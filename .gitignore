@@ -1,0 +1,21 @@
+# Zig build artifacts and cache
+.zig-cache/
+zig-out/
+
+# StrataDB persistent runtime storage and WAL
+stratadb_data/
+*.sdb
+*.wal
+
+# Test scratch directories
+test_data*/
+test_data_sql/
+test_data_alter_sql/
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp
