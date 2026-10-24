@@ -62,8 +62,9 @@ pub const SyncManager = struct {
             .peers_mutex = std.Thread.Mutex{},
         };
 
-        // Wire up engine mutation listener to broadcast in real time
+        // Wire up engine mutation and DDL listeners to broadcast in real time
         engine.setMutationListener(mgr, onLocalMutation);
+        engine.setDdlListener(mgr, onLocalDdl);
 
         return mgr;
     }
@@ -84,6 +85,56 @@ pub const SyncManager = struct {
     fn onLocalMutation(ctx: *anyopaque, record: ChangeRecord) void {
         const self: *SyncManager = @ptrCast(@alignCast(ctx));
         self.broadcastLiveMutation(record);
+    }
+
+    fn onLocalDdl(ctx: *anyopaque, table_name: []const u8, is_drop: bool) void {
+        const self: *SyncManager = @ptrCast(@alignCast(ctx));
+        if (is_drop) {
+            self.broadcastDdlDrop(table_name);
+        } else {
+            self.broadcastTableSync(table_name);
+        }
+    }
+
+    pub fn broadcastTableSync(self: *SyncManager, table_name: []const u8) void {
+        const snap_opt = self.engine.createTableSnapshot(table_name, self.allocator) catch return;
+        if (snap_opt == null) return;
+        var snap = snap_opt.?;
+        defer snap.deinit(self.allocator);
+
+        var buf = std.ArrayList(u8).init(self.allocator);
+        defer buf.deinit();
+        const writer = buf.writer();
+
+        writer.writeInt(u32, 1, .little) catch return;
+        snap.serialize(writer) catch return;
+
+        self.peers_mutex.lock();
+        defer self.peers_mutex.unlock();
+
+        for (self.active_peers.items) |peer| {
+            peer.sendFrame(.table_sync, buf.items) catch {
+                peer.is_alive = false;
+            };
+        }
+    }
+
+    pub fn broadcastDdlDrop(self: *SyncManager, table_name: []const u8) void {
+        var buf = std.ArrayList(u8).init(self.allocator);
+        defer buf.deinit();
+        const writer = buf.writer();
+
+        writer.writeInt(u32, @intCast(table_name.len), .little) catch return;
+        writer.writeAll(table_name) catch return;
+
+        self.peers_mutex.lock();
+        defer self.peers_mutex.unlock();
+
+        for (self.active_peers.items) |peer| {
+            peer.sendFrame(.ddl_drop, buf.items) catch {
+                peer.is_alive = false;
+            };
+        }
     }
 
     pub fn start(self: *SyncManager) !void {
@@ -160,6 +211,9 @@ pub const SyncManager = struct {
         self.addPeer(peer);
         defer self.removePeer(peer);
 
+        // Send all schemas & table snapshots to the new peer
+        self.sendAllTablesSync(peer) catch {};
+
         // Initial Delta Sync: send our changes since their HLC
         self.sendDeltaSync(peer, hello_msg.current_hlc) catch {};
 
@@ -218,6 +272,10 @@ pub const SyncManager = struct {
 
     fn peerWorkerThread(self: *SyncManager, peer: *PeerConnection) void {
         defer self.removePeer(peer);
+
+        // Send our existing schemas & data to remote peer
+        self.sendAllTablesSync(peer) catch {};
+
         // Request delta sync from remote peer
         var req_buf = std.ArrayList(u8).init(self.allocator);
         defer req_buf.deinit();
@@ -239,7 +297,21 @@ pub const SyncManager = struct {
                 .sync_request => {
                     var fbs = std.io.fixedBufferStream(frame.payload);
                     const req = SyncRequestMessage.deserialize(fbs.reader()) catch continue;
+                    self.sendAllTablesSync(peer) catch {};
                     self.sendDeltaSync(peer, req.since_hlc) catch {};
+                },
+                .table_sync => {
+                    var fbs = std.io.fixedBufferStream(frame.payload);
+                    self.applyTableSyncPayload(fbs.reader()) catch {};
+                },
+                .ddl_drop => {
+                    var fbs = std.io.fixedBufferStream(frame.payload);
+                    const r = fbs.reader();
+                    const name_len = r.readInt(u32, .little) catch continue;
+                    const name = self.allocator.alloc(u8, name_len) catch continue;
+                    defer self.allocator.free(name);
+                    r.readNoEof(name) catch continue;
+                    _ = self.engine.dropTableInternal(name) catch {};
                 },
                 .sync_response => {
                     var fbs = std.io.fixedBufferStream(frame.payload);
@@ -262,6 +334,49 @@ pub const SyncManager = struct {
                 },
                 else => {},
             }
+        }
+    }
+
+    pub fn sendAllTablesSync(self: *SyncManager, peer: *PeerConnection) !void {
+        const table_names = try self.engine.listTables(self.allocator);
+        defer {
+            for (table_names) |name| self.allocator.free(name);
+            self.allocator.free(table_names);
+        }
+
+        var snapshots = std.ArrayList(protocol.TableSnapshot).init(self.allocator);
+        defer {
+            for (snapshots.items) |*s| s.deinit(self.allocator);
+            snapshots.deinit();
+        }
+
+        for (table_names) |table_name| {
+            if (self.engine.createTableSnapshot(table_name, self.allocator)) |snap_opt| {
+                if (snap_opt) |snap| {
+                    try snapshots.append(snap);
+                }
+            } else |_| {}
+        }
+
+        var buf = std.ArrayList(u8).init(self.allocator);
+        defer buf.deinit();
+        const writer = buf.writer();
+
+        try writer.writeInt(u32, @intCast(snapshots.items.len), .little);
+        for (snapshots.items) |*snap| {
+            try snap.serialize(writer);
+        }
+
+        try peer.sendFrame(.table_sync, buf.items);
+    }
+
+    pub fn applyTableSyncPayload(self: *SyncManager, reader: anytype) !void {
+        const count = try reader.readInt(u32, .little);
+        var i: usize = 0;
+        while (i < count) : (i += 1) {
+            var snap = try protocol.TableSnapshot.deserialize(self.allocator, reader);
+            defer snap.deinit(self.allocator);
+            try self.engine.applyTableSnapshot(snap);
         }
     }
 

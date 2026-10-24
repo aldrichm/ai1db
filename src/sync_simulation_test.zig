@@ -8,6 +8,7 @@ const Value = types.Value;
 const Engine = @import("storage/engine.zig").Engine;
 const HLC = @import("sync/hlc.zig").HLC;
 const cdc = @import("sync/cdc.zig");
+const protocol = @import("sync/protocol.zig");
 const Parser = @import("sql/parser.zig").Parser;
 const Executor = @import("sql/executor.zig").Executor;
 pub const mariadb = @import("compat/mariadb.zig");
@@ -432,5 +433,132 @@ test "Composite Primary Key Engine and SQL Operations" {
     const deleted = try engine.deleteRowByIndex("accounts", 0);
     try std.testing.expect(deleted);
 }
+
+test "Automatic Table Schema and Data Synchronization Between Desktops" {
+    const allocator = std.testing.allocator;
+
+    const dir_a = "./test_peer_a";
+    const dir_b = "./test_peer_b";
+    std.fs.cwd().deleteTree(dir_a) catch {};
+    std.fs.cwd().deleteTree(dir_b) catch {};
+    defer std.fs.cwd().deleteTree(dir_a) catch {};
+    defer std.fs.cwd().deleteTree(dir_b) catch {};
+
+    const node_a = try Engine.init(allocator, dir_a, "Desktop-A");
+    defer node_a.deinit();
+
+    const node_b = try Engine.init(allocator, dir_b, "Desktop-B");
+    defer node_b.deinit();
+
+    // 1. Node A creates table 'customers' with schema, metadata, and data
+    const cols = [_]Column{
+        .{ .name = "id", .data_type = .integer, .primary_key = true, .auto_increment = true, .nullable = false },
+        .{ .name = "name", .data_type = .text, .primary_key = false, .auto_increment = false, .nullable = false },
+        .{ .name = "balance", .data_type = .real, .primary_key = false, .auto_increment = false, .nullable = true },
+    };
+    const schema = try Schema.init(allocator, &cols);
+    defer schema.deinit(allocator);
+    _ = try node_a.createTable("customers", schema);
+    try node_a.setTableDescription("customers", "Customer Directory");
+    try node_a.setColumnDescription("customers", "balance", "Current ledger balance");
+
+    // Insert 2 rows on Node A
+    var r1_vals = try allocator.alloc(Value, 3);
+    r1_vals[0] = Value{ .integer = 1 };
+    r1_vals[1] = Value{ .text = try allocator.dupe(u8, "Alice Corp") };
+    r1_vals[2] = Value{ .real = 1500.50 };
+    const r1 = Row{ .values = r1_vals };
+    defer r1.deinit(allocator);
+    try node_a.insertRow("customers", r1);
+
+    var r2_vals = try allocator.alloc(Value, 3);
+    r2_vals[0] = Value{ .integer = 2 };
+    r2_vals[1] = Value{ .text = try allocator.dupe(u8, "Bob Logistics") };
+    r2_vals[2] = Value{ .real = 3200.00 };
+    const r2 = Row{ .values = r2_vals };
+    defer r2.deinit(allocator);
+    try node_a.insertRow("customers", r2);
+
+    // 2. Verify Node B is initially completely empty (0 tables)
+    {
+        const b_tables = try node_b.listTables(allocator);
+        defer {
+            for (b_tables) |t| allocator.free(t);
+            allocator.free(b_tables);
+        }
+        try std.testing.expectEqual(@as(usize, 0), b_tables.len);
+    }
+
+    // 3. Generate snapshot on Node A and simulate wire transmission to Node B
+    const snap_opt = try node_a.createTableSnapshot("customers", allocator);
+    try std.testing.expect(snap_opt != null);
+    var snap = snap_opt.?;
+    defer snap.deinit(allocator);
+
+    var wire_buf = std.ArrayList(u8).init(allocator);
+    defer wire_buf.deinit();
+    try snap.serialize(wire_buf.writer());
+
+    // 4. Node B receives wire payload, deserializes, and applies snapshot
+    var fbs = std.io.fixedBufferStream(wire_buf.items);
+    var remote_snap = try protocol.TableSnapshot.deserialize(allocator, fbs.reader());
+    defer remote_snap.deinit(allocator);
+
+    try node_b.applyTableSnapshot(remote_snap);
+
+    // 5. Verify Node B now has 'customers' table created with exact schema and data
+    {
+        const b_tables = try node_b.listTables(allocator);
+        defer {
+            for (b_tables) |t| allocator.free(t);
+            allocator.free(b_tables);
+        }
+        try std.testing.expectEqual(@as(usize, 1), b_tables.len);
+        try std.testing.expectEqualStrings("customers", b_tables[0]);
+    }
+
+    const table_b = node_b.getTable("customers").?;
+    try std.testing.expectEqual(@as(usize, 3), table_b.schema.columns.len);
+    try std.testing.expectEqualStrings("id", table_b.schema.columns[0].name);
+    try std.testing.expect(table_b.schema.columns[0].primary_key);
+    try std.testing.expectEqualStrings("name", table_b.schema.columns[1].name);
+    try std.testing.expectEqualStrings("balance", table_b.schema.columns[2].name);
+
+    // Verify metadata transferred to Node B
+    try std.testing.expectEqualStrings("Customer Directory", node_b.metadata.getTableDescription("customers"));
+    try std.testing.expectEqualStrings("Current ledger balance", node_b.metadata.getColumnDescription("customers", "balance"));
+
+    // Verify row data on Node B
+    try std.testing.expectEqual(@as(usize, 2), table_b.rows.items.len);
+    try std.testing.expectEqual(@as(i64, 1), table_b.rows.items[0].values[0].integer);
+    try std.testing.expectEqualStrings("Alice Corp", table_b.rows.items[0].values[1].text);
+    try std.testing.expectEqual(@as(f64, 1500.50), table_b.rows.items[0].values[2].real);
+    try std.testing.expectEqual(@as(i64, 2), table_b.rows.items[1].values[0].integer);
+    try std.testing.expectEqualStrings("Bob Logistics", table_b.rows.items[1].values[1].text);
+
+    // 6. Test DDL alteration propagation (e.g. adding column)
+    const new_col = Column{ .name = "status", .data_type = .text, .primary_key = false, .auto_increment = false, .nullable = true };
+    try node_a.alterTableAddColumn("customers", new_col);
+
+    const snap2_opt = try node_a.createTableSnapshot("customers", allocator);
+    var snap2 = snap2_opt.?;
+    defer snap2.deinit(allocator);
+
+    var wire_buf2 = std.ArrayList(u8).init(allocator);
+    defer wire_buf2.deinit();
+    try snap2.serialize(wire_buf2.writer());
+
+    var fbs2 = std.io.fixedBufferStream(wire_buf2.items);
+    var remote_snap2 = try protocol.TableSnapshot.deserialize(allocator, fbs2.reader());
+    defer remote_snap2.deinit(allocator);
+
+    try node_b.applyTableSnapshot(remote_snap2);
+
+    // Verify Node B schema has been updated with the 4th column
+    const table_b_updated = node_b.getTable("customers").?;
+    try std.testing.expectEqual(@as(usize, 4), table_b_updated.schema.columns.len);
+    try std.testing.expectEqualStrings("status", table_b_updated.schema.columns[3].name);
+}
+
 
 

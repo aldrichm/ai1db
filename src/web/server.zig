@@ -1313,7 +1313,7 @@ pub const WebServer = struct {
             \\    <div class="card">
             \\      <h3>Connected Desktop Peers</h3>
             \\      <div id="peerCount" class="metric">0 Desktops</div>
-            \\      <div class="submetric">Mesh Auto-Sync Enabled</div>
+            \\      <div id="peerDetails" class="submetric" style="max-height: 180px; overflow-y: auto; margin-top: 6px;">No desktop peers connected &bull; Listening on TCP 7433</div>
             \\    </div>
             \\    <div class="card">
             \\      <h3>HLC Physical/Logical Clock</h3>
@@ -2803,7 +2803,26 @@ pub const WebServer = struct {
             \\      try {
             \\        const res = await fetch('/api/peers');
             \\        const peers = await res.json();
-            \\        document.getElementById('peerCount').innerText = peers.length + ' Desktop(s) Connected';
+            \\        document.getElementById('peerCount').innerText = peers.length + (peers.length === 1 ? ' Desktop Connected' : ' Desktops Connected');
+            \\        const detailsEl = document.getElementById('peerDetails');
+            \\        if (detailsEl) {
+            \\          if (!peers || peers.length === 0) {
+            \\            detailsEl.innerHTML = '<span style="color:#94a3b8;">No desktop peers connected &bull; Listening on TCP 7433</span>';
+            \\          } else {
+            \\            let html = '';
+            \\            for (const p of peers) {
+            \\              html += '<div style="margin-top:6px;padding:6px 8px;background:rgba(255,255,255,0.04);border-radius:6px;border:1px solid rgba(255,255,255,0.08);text-align:left;">';
+            \\              html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">';
+            \\              html += '<strong style="color:#f8fafc;font-size:12px;">' + escapeHtml(p.desktop_name || 'Desktop Peer') + '</strong>';
+            \\              html += '<span style="color:#34d399;font-weight:600;font-size:10px;">● ' + escapeHtml(p.status || 'CONNECTED') + '</span>';
+            \\              html += '</div>';
+            \\              html += '<div style="color:#94a3b8;font-size:11px;margin-bottom:2px;"><strong>Address:</strong> ' + escapeHtml(p.address || '') + '</div>';
+            \\              html += '<div style="color:#94a3b8;font-size:11px;line-height:1.3;"><strong>Peer Node ID:</strong> <code style="font-family:monospace;color:#38bdf8;word-break:break-all;font-size:11px;">' + escapeHtml(p.node_id || '') + '</code></div>';
+            \\              html += '</div>';
+            \\            }
+            \\            detailsEl.innerHTML = html;
+            \\          }
+            \\        }
             \\      } catch(e){}
             \\    }
             \\
@@ -6077,6 +6096,9 @@ pub const WebServer = struct {
         if (file_name) |fn_str| {
             table.saveToFile(fn_str) catch {};
         }
+
+        // Broadcast full table snapshot (schema + all imported rows) to all connected peers
+        self.sync_mgr.broadcastTableSync(name);
 
         // Response
         var json_buf = std.ArrayList(u8).init(self.allocator);

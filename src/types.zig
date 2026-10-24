@@ -386,6 +386,14 @@ pub const Row = struct {
         return Row{ .values = vals };
     }
 
+    pub fn isEqual(self: Row, other: Row) bool {
+        if (self.values.len != other.values.len) return false;
+        for (self.values, 0..) |v, i| {
+            if (!v.isEqual(other.values[i])) return false;
+        }
+        return true;
+    }
+
     pub fn deinit(self: Row, allocator: std.mem.Allocator) void {
         for (self.values) |v| {
             v.deinit(allocator);
