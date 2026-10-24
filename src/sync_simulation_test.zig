@@ -10,6 +10,13 @@ const HLC = @import("sync/hlc.zig").HLC;
 const cdc = @import("sync/cdc.zig");
 const Parser = @import("sql/parser.zig").Parser;
 const Executor = @import("sql/executor.zig").Executor;
+pub const mariadb = @import("compat/mariadb.zig");
+pub const storage_table = @import("storage/table.zig");
+
+test {
+    std.testing.refAllDecls(mariadb);
+    std.testing.refAllDecls(storage_table);
+}
 
 fn runSql(allocator: std.mem.Allocator, executor: *Executor, query: []const u8) !@import("sql/executor.zig").QueryResult {
     var arena = std.heap.ArenaAllocator.init(allocator);
@@ -305,5 +312,125 @@ test "Relational ALTER TABLE Operations" {
         try std.testing.expectEqualStrings("Alice", res.rows[0][1].text);
         try std.testing.expectEqualStrings("alice@example.com", res.rows[0][2].text);
     }
+
+    // 9. ALTER TABLE users DROP PRIMARY KEY;
+    {
+        var res = try runSql(allocator, &executor, "ALTER TABLE users DROP PRIMARY KEY;");
+        defer res.deinit();
+        try std.testing.expect(res.message != null);
+
+        const tbl = engine.getTable("users").?;
+        try std.testing.expectEqual(@as(?usize, null), tbl.schema.getPrimaryKeyIndex());
+    }
+
+    // 10. ALTER TABLE users ADD PRIMARY KEY (email);
+    {
+        var res = try runSql(allocator, &executor, "ALTER TABLE users ADD PRIMARY KEY (email);");
+        defer res.deinit();
+        try std.testing.expect(res.message != null);
+
+        const tbl = engine.getTable("users").?;
+        try std.testing.expectEqual(@as(?usize, 2), tbl.schema.getPrimaryKeyIndex());
+        try std.testing.expectEqualStrings("email", tbl.schema.columns[tbl.schema.getPrimaryKeyIndex().?].name);
+        try std.testing.expect(tbl.pk_index.contains("alice@example.com"));
+    }
+
+    // 11. ALTER TABLE users ADD PRIMARY KEY (id); (redefine back to id)
+    {
+        var res = try runSql(allocator, &executor, "ALTER TABLE users ADD PRIMARY KEY (id);");
+        defer res.deinit();
+        try std.testing.expect(res.message != null);
+
+        const tbl = engine.getTable("users").?;
+        try std.testing.expectEqual(@as(?usize, 0), tbl.schema.getPrimaryKeyIndex());
+        try std.testing.expectEqualStrings("id", tbl.schema.columns[tbl.schema.getPrimaryKeyIndex().?].name);
+        try std.testing.expect(tbl.pk_index.contains("1"));
+        try std.testing.expect(!tbl.pk_index.contains("alice@example.com"));
+    }
 }
+
+test "Composite Primary Key Engine and SQL Operations" {
+    const allocator = std.testing.allocator;
+
+    const tmp_dir = "./test_data_composite_pk";
+    std.fs.cwd().deleteTree(tmp_dir) catch {};
+    defer std.fs.cwd().deleteTree(tmp_dir) catch {};
+
+    const engine = try Engine.init(allocator, tmp_dir, "TestNode");
+    defer engine.deinit();
+
+    var executor = Executor.init(allocator, engine);
+
+    const cols = try allocator.alloc(Column, 3);
+    cols[0] = Column{ .name = try allocator.dupe(u8, "company_code"), .data_type = .text, .primary_key = true, .nullable = false };
+    cols[1] = Column{ .name = try allocator.dupe(u8, "account_id"), .data_type = .integer, .primary_key = true, .nullable = false };
+    cols[2] = Column{ .name = try allocator.dupe(u8, "balance"), .data_type = .real, .primary_key = false, .nullable = true };
+    const schema = Schema{ .columns = cols };
+    defer schema.deinit(allocator);
+    _ = try engine.createTable("accounts", schema);
+
+    // Insert row 1: ("1000", 101, 500.5)
+    var r1_vals = try allocator.alloc(Value, 3);
+    r1_vals[0] = Value{ .text = try allocator.dupe(u8, "1000") };
+    r1_vals[1] = Value{ .integer = 101 };
+    r1_vals[2] = Value{ .real = 500.5 };
+    const r1 = Row{ .values = r1_vals };
+    defer r1.deinit(allocator);
+    try engine.insertRow("accounts", r1);
+
+    // Insert row 2: ("1000", 102, 300.0) -> same company_code, different account_id
+    var r2_vals = try allocator.alloc(Value, 3);
+    r2_vals[0] = Value{ .text = try allocator.dupe(u8, "1000") };
+    r2_vals[1] = Value{ .integer = 102 };
+    r2_vals[2] = Value{ .real = 300.0 };
+    const r2 = Row{ .values = r2_vals };
+    defer r2.deinit(allocator);
+    try engine.insertRow("accounts", r2);
+
+    // Insert row 3: ("2000", 101, 750.0) -> different company_code, same account_id
+    var r3_vals = try allocator.alloc(Value, 3);
+    r3_vals[0] = Value{ .text = try allocator.dupe(u8, "2000") };
+    r3_vals[1] = Value{ .integer = 101 };
+    r3_vals[2] = Value{ .real = 750.0 };
+    const r3 = Row{ .values = r3_vals };
+    defer r3.deinit(allocator);
+    try engine.insertRow("accounts", r3);
+
+    // Duplicate ("1000", 101) -> duplicate error
+    var r_dup_vals = try allocator.alloc(Value, 3);
+    r_dup_vals[0] = Value{ .text = try allocator.dupe(u8, "1000") };
+    r_dup_vals[1] = Value{ .integer = 101 };
+    r_dup_vals[2] = Value{ .real = 999.0 };
+    const r_dup = Row{ .values = r_dup_vals };
+    defer r_dup.deinit(allocator);
+    try std.testing.expectError(error.DuplicatePrimaryKey, engine.insertRow("accounts", r_dup));
+
+    // Update row by index
+    var r1_mod_vals = try allocator.alloc(Value, 3);
+    r1_mod_vals[0] = Value{ .text = try allocator.dupe(u8, "1000") };
+    r1_mod_vals[1] = Value{ .integer = 101 };
+    r1_mod_vals[2] = Value{ .real = 1200.0 };
+    const r1_mod = Row{ .values = r1_mod_vals };
+    defer r1_mod.deinit(allocator);
+    try engine.updateRowByIndex("accounts", 0, r1_mod);
+
+    // SQL Select
+    {
+        var res = try runSql(allocator, &executor, "SELECT company_code, account_id, balance FROM accounts;");
+        defer res.deinit();
+        try std.testing.expectEqual(@as(usize, 3), res.rows.len);
+    }
+
+    // SQL Delete
+    {
+        var res = try runSql(allocator, &executor, "DELETE FROM accounts WHERE account_id = 102;");
+        defer res.deinit();
+        try std.testing.expectEqual(@as(usize, 1), res.affected_rows);
+    }
+
+    // Engine deleteRowByIndex
+    const deleted = try engine.deleteRowByIndex("accounts", 0);
+    try std.testing.expect(deleted);
+}
+
 

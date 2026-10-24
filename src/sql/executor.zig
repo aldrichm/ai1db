@@ -188,6 +188,14 @@ pub const Executor = struct {
                 try self.engine.alterTableRenameColumn(a.table_name, ren.old_name, ren.new_name);
                 msg = try std.fmt.allocPrint(self.allocator, "Table '{s}' column '{s}' renamed to '{s}' successfully.", .{ a.table_name, ren.old_name, ren.new_name });
             },
+            .drop_primary_key => {
+                try self.engine.alterTableDropPrimaryKey(a.table_name);
+                msg = try std.fmt.allocPrint(self.allocator, "Table '{s}' primary key dropped successfully.", .{a.table_name});
+            },
+            .add_primary_key => |pk_col| {
+                try self.engine.alterTableRedefinePrimaryKey(a.table_name, pk_col);
+                msg = try std.fmt.allocPrint(self.allocator, "Table '{s}' primary key defined on '{s}' successfully.", .{ a.table_name, pk_col });
+            },
         }
 
         return QueryResult{
@@ -474,7 +482,14 @@ pub const Executor = struct {
         const table = self.engine.getTable(u.table_name) orelse return error.TableNotFound;
 
         var pks_to_update = std.ArrayList(Value).init(self.allocator);
-        defer pks_to_update.deinit();
+        defer {
+            if (table.schema.getPrimaryKeyCount() > 1) {
+                for (pks_to_update.items) |pk| {
+                    pk.deinit(table.allocator);
+                }
+            }
+            pks_to_update.deinit();
+        }
 
         table.mutex.lock();
         for (table.rows.items) |row| {
@@ -484,6 +499,7 @@ pub const Executor = struct {
                 }
             }
             const pk = try table.getRowPrimaryKey(row);
+            errdefer if (table.schema.getPrimaryKeyCount() > 1) pk.deinit(table.allocator);
             try pks_to_update.append(pk);
         }
         table.mutex.unlock();
@@ -521,7 +537,14 @@ pub const Executor = struct {
         const table = self.engine.getTable(d.table_name) orelse return error.TableNotFound;
 
         var pks_to_delete = std.ArrayList(Value).init(self.allocator);
-        defer pks_to_delete.deinit();
+        defer {
+            if (table.schema.getPrimaryKeyCount() > 1) {
+                for (pks_to_delete.items) |pk| {
+                    pk.deinit(table.allocator);
+                }
+            }
+            pks_to_delete.deinit();
+        }
 
         table.mutex.lock();
         for (table.rows.items) |row| {
@@ -531,6 +554,7 @@ pub const Executor = struct {
                 }
             }
             const pk = try table.getRowPrimaryKey(row);
+            errdefer if (table.schema.getPrimaryKeyCount() > 1) pk.deinit(table.allocator);
             try pks_to_delete.append(pk);
         }
         table.mutex.unlock();
@@ -578,19 +602,24 @@ pub const Executor = struct {
     fn execDescribe(self: *Executor, table_name: []const u8) !QueryResult {
         const table = self.engine.getTable(table_name) orelse return error.TableNotFound;
 
-        var col_names = try self.allocator.alloc([]const u8, 4);
+        var col_names = try self.allocator.alloc([]const u8, 6);
         col_names[0] = try self.allocator.dupe(u8, "column_name");
         col_names[1] = try self.allocator.dupe(u8, "type");
         col_names[2] = try self.allocator.dupe(u8, "primary_key");
         col_names[3] = try self.allocator.dupe(u8, "nullable");
+        col_names[4] = try self.allocator.dupe(u8, "auto_increment");
+        col_names[5] = try self.allocator.dupe(u8, "description");
 
         var rows = try self.allocator.alloc([]Value, table.schema.columns.len);
         for (table.schema.columns, 0..) |col, i| {
-            rows[i] = try self.allocator.alloc(Value, 4);
+            rows[i] = try self.allocator.alloc(Value, 6);
             rows[i][0] = Value{ .text = try self.allocator.dupe(u8, col.name) };
             rows[i][1] = Value{ .text = try self.allocator.dupe(u8, col.data_type.name()) };
             rows[i][2] = Value{ .boolean = col.primary_key };
             rows[i][3] = Value{ .boolean = col.nullable };
+            rows[i][4] = Value{ .boolean = col.auto_increment };
+            const desc = self.engine.getColumnDescription(table_name, col.name);
+            rows[i][5] = Value{ .text = try self.allocator.dupe(u8, desc) };
         }
 
         return QueryResult{
@@ -686,6 +715,7 @@ pub const Executor = struct {
             \\  STATUS;
             \\  PEERS;
             \\  SYNC <ip:port>;
+            \\  IMPORT MARIADB '<filepath.sql>';
             \\  HELP;
             \\  EXIT;
         ;

@@ -231,6 +231,7 @@ pub const Column = struct {
     data_type: DataType,
     primary_key: bool = false,
     nullable: bool = true,
+    auto_increment: bool = false,
 
     pub fn clone(self: Column, allocator: std.mem.Allocator) !Column {
         return Column{
@@ -238,6 +239,7 @@ pub const Column = struct {
             .data_type = self.data_type,
             .primary_key = self.primary_key,
             .nullable = self.nullable,
+            .auto_increment = self.auto_increment,
         };
     }
 
@@ -251,9 +253,10 @@ pub const Column = struct {
         try writer.writeByte(@intFromEnum(self.data_type));
         try writer.writeByte(if (self.primary_key) 1 else 0);
         try writer.writeByte(if (self.nullable) 1 else 0);
+        try writer.writeByte(if (self.auto_increment) 1 else 0);
     }
 
-    pub fn deserialize(allocator: std.mem.Allocator, reader: anytype) !Column {
+    pub fn deserializeVersion(allocator: std.mem.Allocator, reader: anytype, version: u16) !Column {
         const name_len = try reader.readInt(u16, .little);
         const name_buf = try allocator.alloc(u8, name_len);
         errdefer allocator.free(name_buf);
@@ -262,13 +265,19 @@ pub const Column = struct {
         const type_byte = try reader.readByte();
         const pk_byte = try reader.readByte();
         const null_byte = try reader.readByte();
+        const auto_inc_byte = if (version >= 2) try reader.readByte() else 0;
 
         return Column{
             .name = name_buf,
             .data_type = @enumFromInt(type_byte),
             .primary_key = (pk_byte != 0),
             .nullable = (null_byte != 0),
+            .auto_increment = (auto_inc_byte != 0),
         };
+    }
+
+    pub fn deserialize(allocator: std.mem.Allocator, reader: anytype) !Column {
+        return deserializeVersion(allocator, reader, 2);
     }
 };
 
@@ -316,6 +325,21 @@ pub const Schema = struct {
         return null;
     }
 
+    pub fn hasPrimaryKey(self: Schema) bool {
+        for (self.columns) |col| {
+            if (col.primary_key) return true;
+        }
+        return false;
+    }
+
+    pub fn getPrimaryKeyCount(self: Schema) usize {
+        var count: usize = 0;
+        for (self.columns) |col| {
+            if (col.primary_key) count += 1;
+        }
+        return count;
+    }
+
     pub fn serialize(self: Schema, writer: anytype) !void {
         try writer.writeInt(u16, @intCast(self.columns.len), .little);
         for (self.columns) |col| {
@@ -323,7 +347,7 @@ pub const Schema = struct {
         }
     }
 
-    pub fn deserialize(allocator: std.mem.Allocator, reader: anytype) !Schema {
+    pub fn deserializeVersion(allocator: std.mem.Allocator, reader: anytype, version: u16) !Schema {
         const count = try reader.readInt(u16, .little);
         const cols = try allocator.alloc(Column, count);
         errdefer allocator.free(cols);
@@ -332,9 +356,13 @@ pub const Schema = struct {
             for (cols[0..i]) |c| c.deinit(allocator);
         }
         while (i < count) : (i += 1) {
-            cols[i] = try Column.deserialize(allocator, reader);
+            cols[i] = try Column.deserializeVersion(allocator, reader, version);
         }
         return Schema{ .columns = cols };
+    }
+
+    pub fn deserialize(allocator: std.mem.Allocator, reader: anytype) !Schema {
+        return deserializeVersion(allocator, reader, 2);
     }
 };
 

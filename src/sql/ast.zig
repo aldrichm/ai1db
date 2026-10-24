@@ -121,6 +121,8 @@ pub const AlterAction = union(enum) {
         old_name: []const u8,
         new_name: []const u8,
     },
+    drop_primary_key: void,
+    add_primary_key: []const u8,
 };
 
 pub const AlterTableStmt = struct {

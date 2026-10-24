@@ -11,6 +11,7 @@ const ChangeRecord = cdc.ChangeRecord;
 const ChangeLog = cdc.ChangeLog;
 const crdt = @import("../sync/crdt.zig");
 const ConflictResolution = crdt.ConflictResolution;
+const MetadataManager = @import("metadata.zig").MetadataManager;
 
 pub const OnMutationCallback = *const fn (ctx: *anyopaque, record: ChangeRecord) void;
 
@@ -23,6 +24,7 @@ pub const Engine = struct {
     hlc: HLC,
     cdc_log: *ChangeLog,
     wal: ?*WAL,
+    metadata: *MetadataManager,
     mutex: std.Thread.Mutex,
 
     // Mutation listeners for real-time peer streaming
@@ -58,6 +60,9 @@ pub const Engine = struct {
 
         const wal = WAL.init(allocator, wal_path) catch null;
 
+        const metadata = try MetadataManager.init(allocator, data_dir);
+        errdefer metadata.deinit();
+
         engine.* = Engine{
             .allocator = allocator,
             .data_dir = duped_dir,
@@ -67,6 +72,7 @@ pub const Engine = struct {
             .hlc = HLC.init(node_id),
             .cdc_log = cdc_log,
             .wal = wal,
+            .metadata = metadata,
             .mutex = std.Thread.Mutex{},
         };
 
@@ -86,6 +92,8 @@ pub const Engine = struct {
             entry.value_ptr.*.deinit();
         }
         self.tables.deinit();
+
+        self.metadata.deinit();
 
         if (self.wal) |w| {
             w.deinit();
@@ -179,6 +187,8 @@ pub const Engine = struct {
             self.allocator.free(entry.key);
             entry.value.deinit();
 
+            self.metadata.removeTable(name);
+
             const file_name = try std.fmt.allocPrint(self.allocator, "{s}/{s}.sdb", .{ self.data_dir, name });
             defer self.allocator.free(file_name);
             std.fs.cwd().deleteFile(file_name) catch {};
@@ -212,6 +222,8 @@ pub const Engine = struct {
         const table = self.tables.get(table_name) orelse return error.TableNotFound;
         try table.dropColumn(col_name);
 
+        self.metadata.removeColumn(table_name, col_name);
+
         const file_name = try std.fmt.allocPrint(self.allocator, "{s}/{s}.sdb", .{ self.data_dir, table_name });
         defer self.allocator.free(file_name);
         try table.saveToFile(file_name);
@@ -236,9 +248,43 @@ pub const Engine = struct {
         const table = self.tables.get(table_name) orelse return error.TableNotFound;
         try table.renameColumn(old_name, new_name);
 
+        self.metadata.renameColumn(table_name, old_name, new_name) catch {};
+
         const file_name = try std.fmt.allocPrint(self.allocator, "{s}/{s}.sdb", .{ self.data_dir, table_name });
         defer self.allocator.free(file_name);
         try table.saveToFile(file_name);
+    }
+
+    pub fn alterTableRedefinePrimaryKey(self: *Engine, table_name: []const u8, new_pk_col: ?[]const u8) !void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        const table = self.tables.get(table_name) orelse return error.TableNotFound;
+        try table.redefinePrimaryKey(new_pk_col);
+
+        const file_name = try std.fmt.allocPrint(self.allocator, "{s}/{s}.sdb", .{ self.data_dir, table_name });
+        defer self.allocator.free(file_name);
+        try table.saveToFile(file_name);
+    }
+
+    pub fn alterTableDropPrimaryKey(self: *Engine, table_name: []const u8) !void {
+        return self.alterTableRedefinePrimaryKey(table_name, null);
+    }
+
+    pub fn getTableDescription(self: *Engine, table_name: []const u8) []const u8 {
+        return self.metadata.getTableDescription(table_name);
+    }
+
+    pub fn getColumnDescription(self: *Engine, table_name: []const u8, column_name: []const u8) []const u8 {
+        return self.metadata.getColumnDescription(table_name, column_name);
+    }
+
+    pub fn setTableDescription(self: *Engine, table_name: []const u8, description: []const u8) !void {
+        try self.metadata.setTableDescription(table_name, description);
+    }
+
+    pub fn setColumnDescription(self: *Engine, table_name: []const u8, column_name: []const u8, description: []const u8) !void {
+        try self.metadata.setColumnDescription(table_name, column_name, description);
     }
 
     pub fn listTables(self: *Engine, allocator: std.mem.Allocator) ![][]const u8 {
@@ -262,11 +308,12 @@ pub const Engine = struct {
             return error.TableNotFound;
         };
 
-        const pk_val = try table.getRowPrimaryKey(row);
         const current_hlc = self.hlc.now();
         self.mutex.unlock();
 
         try table.insertRow(row, current_hlc);
+        const pk_val = try table.getRowPrimaryKey(row);
+        defer if (table.schema.getPrimaryKeyCount() > 1) pk_val.deinit(table.allocator);
 
         const record = ChangeRecord{
             .table_name = table_name,
@@ -341,6 +388,88 @@ pub const Engine = struct {
         const record = ChangeRecord{
             .table_name = table_name,
             .primary_key = pk,
+            .op = .delete,
+            .hlc = current_hlc,
+            .origin_node = self.node_id,
+            .row = null,
+        };
+
+        if (self.wal) |w| {
+            _ = w.append(record) catch {};
+        }
+
+        try self.cdc_log.append(record);
+
+        if (self.on_mutation) |cb| {
+            if (self.listener_ctx) |ctx| {
+                cb(ctx, record);
+            }
+        }
+
+        return true;
+    }
+
+    pub fn updateRowByIndex(self: *Engine, table_name: []const u8, idx: usize, new_row: Row) !void {
+        self.mutex.lock();
+        const table = self.tables.get(table_name) orelse {
+            self.mutex.unlock();
+            return error.TableNotFound;
+        };
+
+        const current_hlc = self.hlc.now();
+        self.mutex.unlock();
+
+        try table.updateRowByIndex(idx, new_row, current_hlc);
+        const pk_val = try table.getRowPrimaryKey(new_row);
+        defer if (table.schema.getPrimaryKeyCount() > 1) pk_val.deinit(table.allocator);
+
+        const record = ChangeRecord{
+            .table_name = table_name,
+            .primary_key = pk_val,
+            .op = .update,
+            .hlc = current_hlc,
+            .origin_node = self.node_id,
+            .row = new_row,
+        };
+
+        if (self.wal) |w| {
+            _ = w.append(record) catch {};
+        }
+
+        try self.cdc_log.append(record);
+
+        if (self.on_mutation) |cb| {
+            if (self.listener_ctx) |ctx| {
+                cb(ctx, record);
+            }
+        }
+    }
+
+    pub fn deleteRowByIndex(self: *Engine, table_name: []const u8, idx: usize) !bool {
+        self.mutex.lock();
+        const table = self.tables.get(table_name) orelse {
+            self.mutex.unlock();
+            return error.TableNotFound;
+        };
+
+        const current_hlc = self.hlc.now();
+        self.mutex.unlock();
+
+        table.mutex.lock();
+        if (idx >= table.rows.items.len) {
+            table.mutex.unlock();
+            return false;
+        }
+        const pk_val = try table.getRowPrimaryKey(table.rows.items[idx]);
+        table.mutex.unlock();
+        defer if (table.schema.getPrimaryKeyCount() > 1) pk_val.deinit(table.allocator);
+
+        const deleted = try table.deleteRowByIndex(idx, current_hlc);
+        if (!deleted) return false;
+
+        const record = ChangeRecord{
+            .table_name = table_name,
+            .primary_key = pk_val,
             .op = .delete,
             .hlc = current_hlc,
             .origin_node = self.node_id,

@@ -121,23 +121,45 @@ pub const Parser = struct {
         const table_name_tok = try self.expect(.identifier);
 
         if (self.match(.kw_add)) {
+            if (self.match(.kw_primary)) {
+                _ = try self.expect(.kw_key);
+                const has_paren = self.match(.lparen);
+                const pk_col_tok = try self.expect(.identifier);
+                if (has_paren) _ = try self.expect(.rparen);
+                _ = self.match(.semicolon);
+                return Statement{
+                    .alter_table = .{
+                        .table_name = try self.allocator.dupe(u8, table_name_tok.lexeme),
+                        .action = .{
+                            .add_primary_key = try self.allocator.dupe(u8, pk_col_tok.lexeme),
+                        },
+                    },
+                };
+            }
             _ = self.match(.kw_column);
             const col_name_tok = try self.expect(.identifier);
             const type_tok = self.advance();
             const data_type = DataType.fromString(type_tok.lexeme) orelse return error.UnknownDataType;
 
             var is_pk = false;
-            if (self.match(.kw_primary)) {
-                _ = try self.expect(.kw_key);
-                is_pk = true;
-            }
-
+            var is_auto_inc = false;
             var nullable = true;
-            if (self.match(.kw_not)) {
-                _ = try self.expect(.kw_null);
-                nullable = false;
-            } else if (self.match(.kw_null)) {
-                nullable = true;
+
+            while (true) {
+                if (self.match(.kw_primary)) {
+                    _ = try self.expect(.kw_key);
+                    is_pk = true;
+                    nullable = false;
+                } else if (self.match(.kw_autoincrement)) {
+                    is_auto_inc = true;
+                } else if (self.match(.kw_not)) {
+                    _ = try self.expect(.kw_null);
+                    nullable = false;
+                } else if (self.match(.kw_null)) {
+                    nullable = true;
+                } else {
+                    break;
+                }
             }
 
             _ = self.match(.semicolon);
@@ -149,12 +171,25 @@ pub const Parser = struct {
                             .name = try self.allocator.dupe(u8, col_name_tok.lexeme),
                             .data_type = data_type,
                             .primary_key = is_pk,
-                            .nullable = nullable,
+                            .nullable = if (is_pk) false else nullable,
+                            .auto_increment = is_auto_inc,
                         },
                     },
                 },
             };
         } else if (self.match(.kw_drop)) {
+            if (self.match(.kw_primary)) {
+                _ = try self.expect(.kw_key);
+                _ = self.match(.semicolon);
+                return Statement{
+                    .alter_table = .{
+                        .table_name = try self.allocator.dupe(u8, table_name_tok.lexeme),
+                        .action = .{
+                            .drop_primary_key = {},
+                        },
+                    },
+                };
+            }
             _ = self.match(.kw_column);
             const col_name_tok = try self.expect(.identifier);
             _ = self.match(.semicolon);
@@ -173,17 +208,24 @@ pub const Parser = struct {
             const data_type = DataType.fromString(type_tok.lexeme) orelse return error.UnknownDataType;
 
             var is_pk = false;
-            if (self.match(.kw_primary)) {
-                _ = try self.expect(.kw_key);
-                is_pk = true;
-            }
-
+            var is_auto_inc = false;
             var nullable = true;
-            if (self.match(.kw_not)) {
-                _ = try self.expect(.kw_null);
-                nullable = false;
-            } else if (self.match(.kw_null)) {
-                nullable = true;
+
+            while (true) {
+                if (self.match(.kw_primary)) {
+                    _ = try self.expect(.kw_key);
+                    is_pk = true;
+                    nullable = false;
+                } else if (self.match(.kw_autoincrement)) {
+                    is_auto_inc = true;
+                } else if (self.match(.kw_not)) {
+                    _ = try self.expect(.kw_null);
+                    nullable = false;
+                } else if (self.match(.kw_null)) {
+                    nullable = true;
+                } else {
+                    break;
+                }
             }
 
             _ = self.match(.semicolon);
@@ -195,7 +237,8 @@ pub const Parser = struct {
                             .name = try self.allocator.dupe(u8, col_name_tok.lexeme),
                             .data_type = data_type,
                             .primary_key = is_pk,
-                            .nullable = nullable,
+                            .nullable = if (is_pk) false else nullable,
+                            .auto_increment = is_auto_inc,
                         },
                     },
                 },
@@ -237,16 +280,32 @@ pub const Parser = struct {
             const data_type = DataType.fromString(type_tok.lexeme) orelse return error.UnknownDataType;
 
             var is_pk = false;
-            if (self.match(.kw_primary)) {
-                _ = try self.expect(.kw_key);
-                is_pk = true;
+            var is_auto_inc = false;
+            var is_nullable = true;
+
+            while (true) {
+                if (self.match(.kw_primary)) {
+                    _ = try self.expect(.kw_key);
+                    is_pk = true;
+                    is_nullable = false;
+                } else if (self.match(.kw_autoincrement)) {
+                    is_auto_inc = true;
+                } else if (self.match(.kw_not)) {
+                    _ = try self.expect(.kw_null);
+                    is_nullable = false;
+                } else if (self.match(.kw_null)) {
+                    is_nullable = true;
+                } else {
+                    break;
+                }
             }
 
             const col = Column{
                 .name = try self.allocator.dupe(u8, col_name_tok.lexeme),
                 .data_type = data_type,
                 .primary_key = is_pk,
-                .nullable = !is_pk,
+                .nullable = if (is_pk) false else is_nullable,
+                .auto_increment = is_auto_inc,
             };
             try cols.append(col);
 

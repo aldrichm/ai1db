@@ -44,6 +44,7 @@ pub const TokenType = enum {
     kw_column,
     kw_rename,
     kw_to,
+    kw_autoincrement,
 
     // Data types
     kw_int,
@@ -249,6 +250,7 @@ pub const Lexer = struct {
         if (std.ascii.eqlIgnoreCase(lexeme, "COLUMN")) return .kw_column;
         if (std.ascii.eqlIgnoreCase(lexeme, "RENAME")) return .kw_rename;
         if (std.ascii.eqlIgnoreCase(lexeme, "TO")) return .kw_to;
+        if (std.ascii.eqlIgnoreCase(lexeme, "AUTO_INCREMENT") or std.ascii.eqlIgnoreCase(lexeme, "AUTOINCREMENT")) return .kw_autoincrement;
 
         if (std.ascii.eqlIgnoreCase(lexeme, "INT")) return .kw_int;
         if (std.ascii.eqlIgnoreCase(lexeme, "INTEGER")) return .kw_integer;

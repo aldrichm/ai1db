@@ -6,6 +6,7 @@ const DiscoveryBeacon = @import("sync/discovery.zig").DiscoveryBeacon;
 const WebServer = @import("web/server.zig").WebServer;
 const Parser = @import("sql/parser.zig").Parser;
 const Executor = @import("sql/executor.zig").Executor;
+const MariaDbImporter = @import("compat/mariadb.zig").MariaDbImporter;
 
 const BANNER =
     \\
@@ -34,6 +35,7 @@ pub fn main() !void {
     var connect_peer: ?[]const u8 = null;
     var exec_query: ?[]const u8 = null;
     var is_daemon = false;
+    var import_mariadb_file: ?[]const u8 = null;
 
     // Parse command line arguments
     var args = try std.process.argsWithAllocator(allocator);
@@ -43,7 +45,7 @@ pub fn main() !void {
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "--name") or std.mem.eql(u8, arg, "-n")) {
             desktop_name = args.next() orelse desktop_name;
-        } else if (std.mem.eql(u8, arg, "--data") or std.mem.eql(u8, arg, "-d")) {
+        } else if (std.mem.eql(u8, arg, "--data") or std.mem.eql(u8, arg, "--data-dir") or std.mem.eql(u8, arg, "-d")) {
             data_dir = args.next() orelse data_dir;
         } else if (std.mem.eql(u8, arg, "--port") or std.mem.eql(u8, arg, "-p")) {
             const p_str = args.next() orelse "7433";
@@ -55,6 +57,8 @@ pub fn main() !void {
             connect_peer = args.next();
         } else if (std.mem.eql(u8, arg, "--exec") or std.mem.eql(u8, arg, "-e")) {
             exec_query = args.next();
+        } else if (std.mem.eql(u8, arg, "--import-mariadb") or std.mem.eql(u8, arg, "-m")) {
+            import_mariadb_file = args.next();
         } else if (std.mem.eql(u8, arg, "--discovery-port")) {
             const dp_str = args.next() orelse "7432";
             discovery_port = std.fmt.parseInt(u16, dp_str, 10) catch 7432;
@@ -71,6 +75,23 @@ pub fn main() !void {
     // Initialize Database Storage Engine
     const engine = try Engine.init(allocator, data_dir, desktop_name);
     defer engine.deinit();
+
+    // Import MariaDB 11.3 dump file if provided
+    if (import_mariadb_file) |f_path| {
+        std.debug.print("Importing MariaDB 11.3 dump file: {s}...\n", .{f_path});
+        var importer = MariaDbImporter.init(allocator, engine);
+        const res = importer.importFile(f_path) catch |err| {
+            std.debug.print("\x1b[31mFailed to import MariaDB dump {s}: {any}\x1b[0m\n", .{ f_path, err });
+            return err;
+        };
+        std.debug.print("\x1b[32m✔ MariaDB 11.3 Import Completed:\x1b[0m {d} tables created, {d} rows inserted ({d} statements processed, {d} skipped, {d} errors).\n", .{
+            res.tables_created,
+            res.rows_inserted,
+            res.statements_processed,
+            res.statements_skipped,
+            res.errors,
+        });
+    }
 
     // Initialize Sync Manager (TCP Server & Peer Coordinator)
     const sync_mgr = try SyncManager.init(allocator, engine, sync_port);
@@ -166,6 +187,49 @@ fn executeSingle(
     query: []const u8,
     writer: anytype,
 ) !void {
+    const trimmed_q = std.mem.trim(u8, query, " \t\r\n;");
+    var lower_buf: [32]u8 = undefined;
+    const pfx_len = @min(trimmed_q.len, lower_buf.len);
+    const pfx = std.ascii.lowerString(&lower_buf, trimmed_q[0..pfx_len]);
+
+    if (std.mem.startsWith(u8, pfx, "import mariadb") or std.mem.startsWith(u8, pfx, "import ")) {
+        var path_start: ?usize = null;
+        var quote_char: ?u8 = null;
+        for (trimmed_q, 0..) |c, i| {
+            if (c == '\'' or c == '"') {
+                if (path_start == null) {
+                    path_start = i + 1;
+                    quote_char = c;
+                } else if (c == quote_char.?) {
+                    const file_path = trimmed_q[path_start.?..i];
+                    try writer.print("Importing MariaDB 11.3 dump file: \x1b[36m{s}\x1b[0m...\n", .{file_path});
+                    var importer = MariaDbImporter.init(allocator, engine);
+                    const res = importer.importFile(file_path) catch |err| {
+                        try writer.print("\x1b[31mImport failed: {any}\x1b[0m\n", .{err});
+                        return;
+                    };
+                    try writer.print("\x1b[32m✔ MariaDB 11.3 Import Succeeded!\x1b[0m\n", .{});
+                    try writer.print("  • Tables Created:       {d}\n", .{res.tables_created});
+                    try writer.print("  • Rows Inserted:        {d}\n", .{res.rows_inserted});
+                    try writer.print("  • Statements Processed: {d}\n", .{res.statements_processed});
+                    try writer.print("  • Statements Skipped:   {d}\n", .{res.statements_skipped});
+                    try writer.print("  • Errors:               {d}\n", .{res.errors});
+                    return;
+                }
+            }
+        }
+        try writer.print("\x1b[31mUsage: IMPORT MARIADB '<filepath.sql>';\x1b[0m\n", .{});
+        return;
+    } else if (std.mem.startsWith(u8, pfx, "/*!") or std.mem.startsWith(u8, pfx, "-- mariadb") or std.mem.startsWith(u8, pfx, "/*m!")) {
+        var importer = MariaDbImporter.init(allocator, engine);
+        const res = importer.importString(query) catch |err| {
+            try writer.print("\x1b[31mDump import error: {any}\x1b[0m\n", .{err});
+            return;
+        };
+        try writer.print("\x1b[32m✔ MariaDB Raw Dump Ingested:\x1b[0m {d} tables created, {d} rows inserted ({d} statements processed).\n", .{ res.tables_created, res.rows_inserted, res.statements_processed });
+        return;
+    }
+
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const arena_alloc = arena.allocator();
@@ -255,6 +319,7 @@ fn printUsage() void {
         \\  -w, --web-port <port>      Desktop Web UI port (default: 8080)
         \\  -c, --connect <host:port>  Connect to remote desktop on startup
         \\  -e, --exec <sql>           Execute a single SQL command and exit
+        \\  -m, --import-mariadb <file> Import MariaDB 11.3 dump file on startup
         \\      --server, --daemon     Run in server/daemon mode without interactive REPL
         \\      --no-discovery         Disable automatic UDP LAN broadcast discovery
         \\  -h, --help                 Show this help message
