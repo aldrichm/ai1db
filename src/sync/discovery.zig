@@ -8,6 +8,8 @@ pub const DiscoveryBeacon = struct {
     running: bool = false,
     beacon_thread: ?std.Thread = null,
     listener_thread: ?std.Thread = null,
+    listener_sock: ?std.posix.socket_t = null,
+    broadcast_sock: ?std.posix.socket_t = null,
 
     pub fn init(allocator: std.mem.Allocator, sync_mgr: *SyncManager, broadcast_port: u16) !*DiscoveryBeacon {
         const beacon = try allocator.create(DiscoveryBeacon);
@@ -16,12 +18,32 @@ pub const DiscoveryBeacon = struct {
             .sync_mgr = sync_mgr,
             .broadcast_port = broadcast_port,
             .running = false,
+            .listener_sock = null,
+            .broadcast_sock = null,
         };
         return beacon;
     }
 
     pub fn deinit(self: *DiscoveryBeacon) void {
         self.running = false;
+        if (self.listener_sock) |s| {
+            _ = std.posix.shutdown(s, .both) catch {};
+            std.posix.close(s);
+            self.listener_sock = null;
+        }
+        if (self.broadcast_sock) |s| {
+            _ = std.posix.shutdown(s, .both) catch {};
+            std.posix.close(s);
+            self.broadcast_sock = null;
+        }
+        if (self.listener_thread) |t| {
+            t.join();
+            self.listener_thread = null;
+        }
+        if (self.beacon_thread) |t| {
+            t.join();
+            self.beacon_thread = null;
+        }
         self.allocator.destroy(self);
     }
 
@@ -33,7 +55,13 @@ pub const DiscoveryBeacon = struct {
 
     fn broadcasterWorker(self: *DiscoveryBeacon) void {
         const sock = std.posix.socket(std.posix.AF.INET, std.posix.SOCK.DGRAM, 0) catch return;
-        defer std.posix.close(sock);
+        self.broadcast_sock = sock;
+        defer {
+            if (self.broadcast_sock != null) {
+                std.posix.close(sock);
+                self.broadcast_sock = null;
+            }
+        }
 
         // Enable SO_BROADCAST
         const enable: c_int = 1;
@@ -60,14 +88,23 @@ pub const DiscoveryBeacon = struct {
                 broadcast_addr.getOsSockLen(),
             ) catch {};
 
-            // Broadcast every 3 seconds
-            std.time.sleep(3 * std.time.ns_per_s);
+            // Sleep in 100ms intervals so shutdown is prompt
+            var waited_ms: usize = 0;
+            while (waited_ms < 3000 and self.running) : (waited_ms += 100) {
+                std.time.sleep(100 * std.time.ns_per_ms);
+            }
         }
     }
 
     fn listenerWorker(self: *DiscoveryBeacon) void {
         const sock = std.posix.socket(std.posix.AF.INET, std.posix.SOCK.DGRAM, 0) catch return;
-        defer std.posix.close(sock);
+        self.listener_sock = sock;
+        defer {
+            if (self.listener_sock != null) {
+                std.posix.close(sock);
+                self.listener_sock = null;
+            }
+        }
 
         // Reuse port/addr
         const enable: c_int = 1;
@@ -91,7 +128,7 @@ pub const DiscoveryBeacon = struct {
                 0,
                 @ptrCast(&src_addr),
                 &src_len,
-            ) catch continue;
+            ) catch break;
 
             if (n <= 0) continue;
             const packet = buf[0..n];
@@ -118,15 +155,17 @@ pub const DiscoveryBeacon = struct {
                 ip_bytes[0], ip_bytes[1], ip_bytes[2], ip_bytes[3],
             }) catch continue;
 
-            // Check if already connected
+            // Check if already connected with a live session
             var already_connected = false;
             self.sync_mgr.peers_mutex.lock();
             for (self.sync_mgr.active_peers.items) |peer| {
                 var phex: [32]u8 = undefined;
                 _ = std.fmt.bufPrint(&phex, "{s}", .{std.fmt.fmtSliceHexLower(&peer.node_id)}) catch "";
                 if (std.mem.eql(u8, &phex, peer_node_hex)) {
-                    already_connected = true;
-                    break;
+                    if (peer.is_alive and !peer.is_closed) {
+                        already_connected = true;
+                        break;
+                    }
                 }
             }
             self.sync_mgr.peers_mutex.unlock();

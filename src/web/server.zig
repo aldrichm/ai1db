@@ -242,6 +242,15 @@ pub const WebServer = struct {
             } else {
                 sendError(stream, 400, "Bad Request");
             }
+        } else if (std.mem.eql(u8, method, "POST") and std.mem.eql(u8, path, "/api/sync/connect")) {
+            if (std.mem.indexOf(u8, request, "\r\n\r\n")) |body_idx| {
+                const body = request[body_idx + 4 ..];
+                self.serveSyncConnect(stream, body);
+            } else {
+                sendError(stream, 400, "Bad Request");
+            }
+        } else if (std.mem.eql(u8, method, "POST") and std.mem.eql(u8, path, "/api/sync/trigger")) {
+            self.serveSyncTrigger(stream);
         } else {
             sendError(stream, 404, "Not Found");
         }
@@ -1311,9 +1320,17 @@ pub const WebServer = struct {
             \\      <div class="submetric">Peer TCP 7433 &bull; UDP 7432</div>
             \\    </div>
             \\    <div class="card">
-            \\      <h3>Connected Desktop Peers</h3>
-            \\      <div id="peerCount" class="metric">0 Desktops</div>
+            \\      <div style="display:flex; justify-content:space-between; align-items:center;">
+            \\        <h3 style="margin:0;">Connected Desktop Peers</h3>
+            \\        <button onclick="triggerManualSync()" class="pill" style="cursor:pointer; background:#0284c7; color:#fff; border:none; padding:3px 9px; font-size:11px; border-radius:4px; font-weight:600;">🔄 Sync Now</button>
+            \\      </div>
+            \\      <div id="peerCount" class="metric" style="margin-top:6px;">0 Desktops</div>
             \\      <div id="peerDetails" class="submetric" style="max-height: 180px; overflow-y: auto; margin-top: 6px;">No desktop peers connected &bull; Listening on TCP 7433</div>
+            \\      <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); display: flex; gap: 6px;">
+            \\        <input type="text" id="manualPeerAddress" placeholder="IP:7433 (e.g. 192.168.1.50:7433)" style="flex:1; background:#0f172a; border:1px solid #334155; color:#f8fafc; padding:4px 8px; border-radius:4px; font-size:11px;" />
+            \\        <button onclick="connectManualPeer()" class="pill pill-alter" style="cursor:pointer; font-size:11px; padding:4px 10px;">Connect</button>
+            \\      </div>
+            \\      <div id="manualSyncStatus" style="font-size:11px; margin-top:4px; min-height:14px;"></div>
             \\    </div>
             \\    <div class="card">
             \\      <h3>HLC Physical/Logical Clock</h3>
@@ -2824,6 +2841,56 @@ pub const WebServer = struct {
             \\          }
             \\        }
             \\      } catch(e){}
+            \\    }
+            \\
+            \\    async function triggerManualSync() {
+            \\      const statusEl = document.getElementById('manualSyncStatus');
+            \\      if (statusEl) statusEl.innerHTML = '<span style="color:#38bdf8;">Triggering full sync across peers...</span>';
+            \\      try {
+            \\        const res = await fetch('/api/sync/trigger', { method: 'POST' });
+            \\        const data = await res.json();
+            \\        if (statusEl) {
+            \\          if (data.status === 'ok') {
+            \\            statusEl.innerHTML = '<span style="color:#34d399;">✓ ' + escapeHtml(data.message || 'Sync triggered successfully') + '</span>';
+            \\          } else {
+            \\            statusEl.innerHTML = '<span style="color:#f87171;">' + escapeHtml(data.message || 'Sync failed') + '</span>';
+            \\          }
+            \\        }
+            \\        await updateStatus();
+            \\        await fetchTables();
+            \\      } catch (e) {
+            \\        if (statusEl) statusEl.innerHTML = '<span style="color:#f87171;">Failed to trigger sync: ' + escapeHtml(e.message) + '</span>';
+            \\      }
+            \\    }
+            \\
+            \\    async function connectManualPeer() {
+            \\      const inputEl = document.getElementById('manualPeerAddress');
+            \\      const statusEl = document.getElementById('manualSyncStatus');
+            \\      if (!inputEl) return;
+            \\      const addr = inputEl.value.trim();
+            \\      if (!addr) {
+            \\        if (statusEl) statusEl.innerHTML = '<span style="color:#f87171;">Please enter peer IP:Port (e.g. 192.168.1.50:7433)</span>';
+            \\        return;
+            \\      }
+            \\      if (statusEl) statusEl.innerHTML = '<span style="color:#38bdf8;">Connecting to ' + escapeHtml(addr) + '...</span>';
+            \\      try {
+            \\        const res = await fetch('/api/sync/connect', {
+            \\          method: 'POST',
+            \\          headers: { 'Content-Type': 'application/json' },
+            \\          body: JSON.stringify({ address: addr })
+            \\        });
+            \\        const data = await res.json();
+            \\        if (data.status === 'ok') {
+            \\          if (statusEl) statusEl.innerHTML = '<span style="color:#34d399;">✓ ' + escapeHtml(data.message || 'Connected to peer successfully') + '</span>';
+            \\          inputEl.value = '';
+            \\          await updateStatus();
+            \\          await fetchTables();
+            \\        } else {
+            \\          if (statusEl) statusEl.innerHTML = '<span style="color:#f87171;">' + escapeHtml(data.message || 'Connection failed') + '</span>';
+            \\        }
+            \\      } catch (e) {
+            \\        if (statusEl) statusEl.innerHTML = '<span style="color:#f87171;">Network error connecting to peer: ' + escapeHtml(e.message) + '</span>';
+            \\      }
             \\    }
             \\
             \\    async function fetchTables() {
@@ -4742,6 +4809,63 @@ pub const WebServer = struct {
         swriter.print(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}",
             .{ json_buf.items.len, json_buf.items },
+        ) catch {};
+    }
+
+    fn serveSyncConnect(self: *WebServer, stream: std.net.Stream, body: []const u8) void {
+        var host: []const u8 = "127.0.0.1";
+        var port: u16 = 7433;
+
+        if (std.mem.indexOf(u8, body, "\"address\"")) |addr_idx| {
+            if (std.mem.indexOfPos(u8, body, addr_idx + 9, "\"")) |q1| {
+                if (std.mem.indexOfPos(u8, body, q1 + 1, "\"")) |q2| {
+                    const addr_str = std.mem.trim(u8, body[q1 + 1 .. q2], " \t\r\n");
+                    if (std.mem.indexOfScalar(u8, addr_str, ':')) |colon| {
+                        host = addr_str[0..colon];
+                        port = std.fmt.parseInt(u16, addr_str[colon + 1 ..], 10) catch 7433;
+                    } else {
+                        host = addr_str;
+                    }
+                }
+            }
+        }
+
+        self.sync_mgr.connectToPeer(host, port) catch |err| {
+            const writer = stream.writer();
+            var err_buf: [256]u8 = undefined;
+            const msg = std.fmt.bufPrint(&err_buf, "{{\"status\":\"error\",\"message\":\"Failed to connect: {any}\"}}", .{err}) catch return;
+            writer.print(
+                "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}",
+                .{ msg.len, msg },
+            ) catch {};
+            return;
+        };
+
+        const resp = "{\"status\":\"ok\",\"message\":\"Connected to peer successfully\"}";
+        const writer = stream.writer();
+        writer.print(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}",
+            .{ resp.len, resp },
+        ) catch {};
+    }
+
+    fn serveSyncTrigger(self: *WebServer, stream: std.net.Stream) void {
+        self.sync_mgr.broadcastAllTablesSync() catch |err| {
+            const writer = stream.writer();
+            var err_buf: [256]u8 = undefined;
+            const msg = std.fmt.bufPrint(&err_buf, "{{\"status\":\"error\",\"message\":\"Failed to trigger sync: {any}\"}}", .{err}) catch return;
+            writer.print(
+                "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}",
+                .{ msg.len, msg },
+            ) catch {};
+            return;
+        };
+
+        const resp = "{\"status\":\"ok\",\"message\":\"Full table sync triggered across active peers\"}";
+        const writer = stream.writer();
+        writer.print(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}",
+            .{ resp.len, resp },
         ) catch {};
     }
 

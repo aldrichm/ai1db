@@ -770,9 +770,11 @@ pub const Engine = struct {
             table.mutex.unlock();
             return false;
         }
-        const pk_val = try table.getRowPrimaryKey(table.rows.items[idx]);
+        const raw_pk = try table.getRowPrimaryKey(table.rows.items[idx]);
+        const pk_val = try raw_pk.clone(table.allocator);
+        if (table.schema.getPrimaryKeyCount() > 1) raw_pk.deinit(table.allocator);
         table.mutex.unlock();
-        defer if (table.schema.getPrimaryKeyCount() > 1) pk_val.deinit(table.allocator);
+        defer pk_val.deinit(table.allocator);
 
         const deleted = try table.deleteRowByIndex(idx, current_hlc);
         if (!deleted) return false;
@@ -816,6 +818,10 @@ pub const Engine = struct {
         if (resolution == .applied_incoming) {
             // Also append to our local CDC so downstream peers get synced transitively!
             try self.cdc_log.append(record);
+            // Persist replicated mutation to disk immediately
+            const file_name = try std.fmt.allocPrint(self.allocator, "{s}/{s}.sdb", .{ self.data_dir, record.table_name });
+            defer self.allocator.free(file_name);
+            table.?.saveToFile(file_name) catch {};
         }
         return resolution;
     }

@@ -21,6 +21,14 @@ const BANNER =
 ;
 
 pub fn main() !void {
+    // Ignore SIGPIPE so broken network connections do not crash the daemon
+    const act = std.posix.Sigaction{
+        .handler = .{ .handler = std.posix.SIG.IGN },
+        .mask = std.posix.empty_sigset,
+        .flags = 0,
+    };
+    std.posix.sigaction(std.posix.SIG.PIPE, &act, null) catch {};
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();

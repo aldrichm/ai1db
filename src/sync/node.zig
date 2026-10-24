@@ -18,6 +18,26 @@ pub const PeerInfo = struct {
     last_sync_hlc: HLC,
 };
 
+fn configureSocket(stream: std.net.Stream) void {
+    const handle = stream.handle;
+    if (@hasDecl(std.posix.SO, "NOSIGPIPE")) {
+        const val: c_int = 1;
+        std.posix.setsockopt(handle, std.posix.SOL.SOCKET, std.posix.SO.NOSIGPIPE, std.mem.asBytes(&val)) catch {};
+    }
+    {
+        const val: c_int = 1;
+        std.posix.setsockopt(handle, std.posix.SOL.SOCKET, std.posix.SO.KEEPALIVE, std.mem.asBytes(&val)) catch {};
+    }
+    {
+        const timeout = std.posix.timeval{ .tv_sec = 5, .tv_usec = 0 };
+        std.posix.setsockopt(handle, std.posix.SOL.SOCKET, std.posix.SO.SNDTIMEO, std.mem.asBytes(&timeout)) catch {};
+    }
+    {
+        const timeout = std.posix.timeval{ .tv_sec = 10, .tv_usec = 0 };
+        std.posix.setsockopt(handle, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO, std.mem.asBytes(&timeout)) catch {};
+    }
+}
+
 pub const PeerConnection = struct {
     allocator: std.mem.Allocator,
     stream: std.net.Stream,
@@ -26,20 +46,65 @@ pub const PeerConnection = struct {
     address_str: []const u8,
     last_hlc: HLC,
     is_alive: bool = true,
+    is_closed: bool = false,
+    ref_count: std.atomic.Value(u32),
     mutex: std.Thread.Mutex,
+
+    pub fn init(
+        allocator: std.mem.Allocator,
+        stream: std.net.Stream,
+        node_id: [16]u8,
+        desktop_name: []const u8,
+        address_str: []const u8,
+        last_hlc: HLC,
+    ) !*PeerConnection {
+        const peer = try allocator.create(PeerConnection);
+        peer.* = PeerConnection{
+            .allocator = allocator,
+            .stream = stream,
+            .node_id = node_id,
+            .desktop_name = try allocator.dupe(u8, desktop_name),
+            .address_str = try allocator.dupe(u8, address_str),
+            .last_hlc = last_hlc,
+            .is_alive = true,
+            .is_closed = false,
+            .ref_count = std.atomic.Value(u32).init(1),
+            .mutex = std.Thread.Mutex{},
+        };
+        return peer;
+    }
+
+    pub fn ref(self: *PeerConnection) *PeerConnection {
+        _ = self.ref_count.fetchAdd(1, .monotonic);
+        return self;
+    }
+
+    pub fn unref(self: *PeerConnection) void {
+        if (self.ref_count.fetchSub(1, .release) == 1) {
+            self.ref_count.fence(.acquire);
+            self.close();
+            self.allocator.free(self.desktop_name);
+            self.allocator.free(self.address_str);
+            self.allocator.destroy(self);
+        }
+    }
+
+    pub fn close(self: *PeerConnection) void {
+        self.mutex.lock();
+        if (!self.is_closed) {
+            self.is_closed = true;
+            self.is_alive = false;
+            _ = std.posix.shutdown(self.stream.handle, .both) catch {};
+            self.stream.close();
+        }
+        self.mutex.unlock();
+    }
 
     pub fn sendFrame(self: *PeerConnection, msg_type: MessageType, payload: []const u8) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
+        if (self.is_closed or !self.is_alive) return error.ConnectionClosed;
         try Frame.write(self.stream.writer(), msg_type, payload);
-    }
-
-    pub fn deinit(self: *PeerConnection) void {
-        self.is_alive = false;
-        self.stream.close();
-        self.allocator.free(self.desktop_name);
-        self.allocator.free(self.address_str);
-        self.allocator.destroy(self);
     }
 };
 
@@ -51,6 +116,7 @@ pub const SyncManager = struct {
     active_peers: std.ArrayList(*PeerConnection),
     peers_mutex: std.Thread.Mutex,
     server_thread: ?std.Thread = null,
+    active_threads: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
 
     pub fn init(allocator: std.mem.Allocator, engine: *Engine, listen_port: u16) !*SyncManager {
         const mgr = try allocator.create(SyncManager);
@@ -60,6 +126,7 @@ pub const SyncManager = struct {
             .listen_port = listen_port,
             .active_peers = std.ArrayList(*PeerConnection).init(allocator),
             .peers_mutex = std.Thread.Mutex{},
+            .active_threads = std.atomic.Value(usize).init(0),
         };
 
         // Wire up engine mutation and DDL listeners to broadcast in real time
@@ -72,9 +139,32 @@ pub const SyncManager = struct {
     pub fn deinit(self: *SyncManager) void {
         self.server_running = false;
 
+        // Wake up listening socket to terminate accept loop
+        if (std.net.tcpConnectToHost(self.allocator, "127.0.0.1", self.listen_port)) |stream| {
+            stream.close();
+        } else |_| {}
+
+        if (self.server_thread) |t| {
+            t.join();
+            self.server_thread = null;
+        }
+
+        // Close all peer connections to unblock pending reads/writes
         self.peers_mutex.lock();
         for (self.active_peers.items) |peer| {
-            peer.deinit();
+            peer.close();
+        }
+        self.peers_mutex.unlock();
+
+        // Wait for all worker threads to cleanly exit
+        while (self.active_threads.load(.acquire) > 0) {
+            std.time.sleep(5 * std.time.ns_per_ms);
+        }
+
+        // Release references held by active_peers
+        self.peers_mutex.lock();
+        for (self.active_peers.items) |peer| {
+            peer.unref();
         }
         self.active_peers.deinit();
         self.peers_mutex.unlock();
@@ -109,12 +199,24 @@ pub const SyncManager = struct {
         writer.writeInt(u32, 1, .little) catch return;
         snap.serialize(writer) catch return;
 
-        self.peers_mutex.lock();
-        defer self.peers_mutex.unlock();
+        // Snapshot peers under lock, send outside lock
+        var peers_to_send = std.ArrayList(*PeerConnection).init(self.allocator);
+        defer {
+            for (peers_to_send.items) |peer| peer.unref();
+            peers_to_send.deinit();
+        }
 
+        self.peers_mutex.lock();
         for (self.active_peers.items) |peer| {
+            if (peer.is_alive and !peer.is_closed) {
+                peers_to_send.append(peer.ref()) catch continue;
+            }
+        }
+        self.peers_mutex.unlock();
+
+        for (peers_to_send.items) |peer| {
             peer.sendFrame(.table_sync, buf.items) catch {
-                peer.is_alive = false;
+                peer.close();
             };
         }
     }
@@ -127,12 +229,23 @@ pub const SyncManager = struct {
         writer.writeInt(u32, @intCast(table_name.len), .little) catch return;
         writer.writeAll(table_name) catch return;
 
-        self.peers_mutex.lock();
-        defer self.peers_mutex.unlock();
+        var peers_to_send = std.ArrayList(*PeerConnection).init(self.allocator);
+        defer {
+            for (peers_to_send.items) |peer| peer.unref();
+            peers_to_send.deinit();
+        }
 
+        self.peers_mutex.lock();
         for (self.active_peers.items) |peer| {
+            if (peer.is_alive and !peer.is_closed) {
+                peers_to_send.append(peer.ref()) catch continue;
+            }
+        }
+        self.peers_mutex.unlock();
+
+        for (peers_to_send.items) |peer| {
             peer.sendFrame(.ddl_drop, buf.items) catch {
-                peer.is_alive = false;
+                peer.close();
             };
         }
     }
@@ -149,6 +262,10 @@ pub const SyncManager = struct {
 
         while (self.server_running) {
             const conn = server.accept() catch continue;
+            if (!self.server_running) {
+                conn.stream.close();
+                break;
+            }
             _ = std.Thread.spawn(.{}, handleIncomingPeer, .{ self, conn.stream, conn.address }) catch {
                 conn.stream.close();
             };
@@ -156,6 +273,11 @@ pub const SyncManager = struct {
     }
 
     fn handleIncomingPeer(self: *SyncManager, stream: std.net.Stream, addr: std.net.Address) void {
+        _ = self.active_threads.fetchAdd(1, .release);
+        defer _ = self.active_threads.fetchSub(1, .release);
+
+        configureSocket(stream);
+
         var addr_buf: [64]u8 = undefined;
         const addr_str = std.fmt.bufPrint(&addr_buf, "{any}", .{addr}) catch "unknown";
 
@@ -193,22 +315,33 @@ pub const SyncManager = struct {
             .current_hlc = self.engine.hlc,
             .listen_port = self.listen_port,
         };
-        ack_msg.serialize(ack_buf.writer()) catch return;
-        Frame.write(stream.writer(), .hello_ack, ack_buf.items) catch return;
-
-        // Register peer
-        const peer = self.allocator.create(PeerConnection) catch return;
-        peer.* = PeerConnection{
-            .allocator = self.allocator,
-            .stream = stream,
-            .node_id = hello_msg.node_id,
-            .desktop_name = self.allocator.dupe(u8, hello_msg.desktop_name) catch return,
-            .address_str = self.allocator.dupe(u8, addr_str) catch return,
-            .last_hlc = hello_msg.current_hlc,
-            .mutex = std.Thread.Mutex{},
+        ack_msg.serialize(ack_buf.writer()) catch {
+            stream.close();
+            return;
+        };
+        Frame.write(stream.writer(), .hello_ack, ack_buf.items) catch {
+            stream.close();
+            return;
         };
 
-        self.addPeer(peer);
+        // Register peer
+        const peer = PeerConnection.init(
+            self.allocator,
+            stream,
+            hello_msg.node_id,
+            hello_msg.desktop_name,
+            addr_str,
+            hello_msg.current_hlc,
+        ) catch {
+            stream.close();
+            return;
+        };
+        defer peer.unref();
+
+        if (!self.addPeer(peer)) {
+            peer.close();
+            return;
+        }
         defer self.removePeer(peer);
 
         // Send all schemas & table snapshots to the new peer
@@ -225,6 +358,7 @@ pub const SyncManager = struct {
         const address = try std.net.Address.parseIp4(host, port);
         const stream = try std.net.tcpConnectToAddress(address);
         errdefer stream.close();
+        configureSocket(stream);
 
         // Send Hello
         var hello_buf = std.ArrayList(u8).init(self.allocator);
@@ -250,28 +384,42 @@ pub const SyncManager = struct {
         const ack_msg = try HelloMessage.deserialize(self.allocator, fbs.reader());
         defer self.allocator.free(ack_msg.desktop_name);
 
+        // Don't connect to self
+        if (std.mem.eql(u8, &ack_msg.node_id, &self.engine.node_id)) {
+            return error.CannotConnectToSelf;
+        }
+
         const addr_str = try std.fmt.allocPrint(self.allocator, "{s}:{d}", .{ host, port });
-        errdefer self.allocator.free(addr_str);
+        defer self.allocator.free(addr_str);
 
-        const peer = try self.allocator.create(PeerConnection);
-        peer.* = PeerConnection{
-            .allocator = self.allocator,
-            .stream = stream,
-            .node_id = ack_msg.node_id,
-            .desktop_name = try self.allocator.dupe(u8, ack_msg.desktop_name),
-            .address_str = addr_str,
-            .last_hlc = ack_msg.current_hlc,
-            .mutex = std.Thread.Mutex{},
-        };
+        const peer = try PeerConnection.init(
+            self.allocator,
+            stream,
+            ack_msg.node_id,
+            ack_msg.desktop_name,
+            addr_str,
+            ack_msg.current_hlc,
+        );
+        errdefer peer.unref();
 
-        self.addPeer(peer);
+        if (!self.addPeer(peer)) {
+            // Already connected to this peer
+            peer.close();
+            peer.unref();
+            return;
+        }
 
         // Spawn background worker for this connected peer
         _ = try std.Thread.spawn(.{}, peerWorkerThread, .{ self, peer });
     }
 
     fn peerWorkerThread(self: *SyncManager, peer: *PeerConnection) void {
-        defer self.removePeer(peer);
+        _ = self.active_threads.fetchAdd(1, .release);
+        defer {
+            self.removePeer(peer);
+            peer.unref();
+            _ = self.active_threads.fetchSub(1, .release);
+        }
 
         // Send our existing schemas & data to remote peer
         self.sendAllTablesSync(peer) catch {};
@@ -289,11 +437,22 @@ pub const SyncManager = struct {
     fn peerMessageLoop(self: *SyncManager, peer: *PeerConnection) void {
         const reader = peer.stream.reader();
 
-        while (peer.is_alive and self.server_running) {
-            const frame = Frame.read(self.allocator, reader) catch break;
+        while (peer.is_alive and !peer.is_closed and self.server_running) {
+            const frame = Frame.read(self.allocator, reader) catch |err| {
+                if (err == error.WouldBlock) {
+                    // Timeout heartbeat check
+                    peer.sendFrame(.ping, &[_]u8{}) catch break;
+                    continue;
+                }
+                break;
+            };
             defer self.allocator.free(frame.payload);
 
             switch (frame.msg_type) {
+                .ping => {
+                    peer.sendFrame(.pong, &[_]u8{}) catch break;
+                },
+                .pong => {},
                 .sync_request => {
                     var fbs = std.io.fixedBufferStream(frame.payload);
                     const req = SyncRequestMessage.deserialize(fbs.reader()) catch continue;
@@ -328,9 +487,6 @@ pub const SyncManager = struct {
                     const rec = ChangeRecord.deserialize(self.allocator, fbs.reader()) catch continue;
                     defer rec.deinit(self.allocator);
                     _ = self.engine.applyRemoteChange(rec) catch {};
-                },
-                .ping => {
-                    peer.sendFrame(.pong, &[_]u8{}) catch break;
                 },
                 else => {},
             }
@@ -370,6 +526,28 @@ pub const SyncManager = struct {
         try peer.sendFrame(.table_sync, buf.items);
     }
 
+    pub fn broadcastAllTablesSync(self: *SyncManager) !void {
+        var peers_to_send = std.ArrayList(*PeerConnection).init(self.allocator);
+        defer {
+            for (peers_to_send.items) |peer| peer.unref();
+            peers_to_send.deinit();
+        }
+
+        self.peers_mutex.lock();
+        for (self.active_peers.items) |peer| {
+            if (peer.is_alive and !peer.is_closed) {
+                try peers_to_send.append(peer.ref());
+            }
+        }
+        self.peers_mutex.unlock();
+
+        for (peers_to_send.items) |peer| {
+            self.sendAllTablesSync(peer) catch {
+                peer.close();
+            };
+        }
+    }
+
     pub fn applyTableSyncPayload(self: *SyncManager, reader: anytype) !void {
         const count = try reader.readInt(u32, .little);
         var i: usize = 0;
@@ -404,30 +582,59 @@ pub const SyncManager = struct {
         defer buf.deinit();
         record.serialize(buf.writer()) catch return;
 
-        self.peers_mutex.lock();
-        defer self.peers_mutex.unlock();
+        var peers_to_send = std.ArrayList(*PeerConnection).init(self.allocator);
+        defer {
+            for (peers_to_send.items) |peer| peer.unref();
+            peers_to_send.deinit();
+        }
 
+        self.peers_mutex.lock();
         for (self.active_peers.items) |peer| {
+            if (peer.is_alive and !peer.is_closed) {
+                peers_to_send.append(peer.ref()) catch continue;
+            }
+        }
+        self.peers_mutex.unlock();
+
+        for (peers_to_send.items) |peer| {
             peer.sendFrame(.live_mutation, buf.items) catch {
-                peer.is_alive = false;
+                peer.close();
             };
         }
     }
 
-    fn addPeer(self: *SyncManager, peer: *PeerConnection) void {
+    fn addPeer(self: *SyncManager, peer: *PeerConnection) bool {
         self.peers_mutex.lock();
         defer self.peers_mutex.unlock();
-        self.active_peers.append(peer) catch {};
+
+        var i: usize = 0;
+        while (i < self.active_peers.items.len) {
+            const existing = self.active_peers.items[i];
+            if (std.mem.eql(u8, &existing.node_id, &peer.node_id)) {
+                if (existing.is_alive and !existing.is_closed) {
+                    return false;
+                } else {
+                    _ = self.active_peers.swapRemove(i);
+                    existing.unref();
+                    continue;
+                }
+            }
+            i += 1;
+        }
+
+        self.active_peers.append(peer.ref()) catch return false;
+        return true;
     }
 
     fn removePeer(self: *SyncManager, peer: *PeerConnection) void {
+        peer.close();
         self.peers_mutex.lock();
         defer self.peers_mutex.unlock();
 
         for (self.active_peers.items, 0..) |p, i| {
             if (p == peer) {
                 _ = self.active_peers.swapRemove(i);
-                peer.deinit();
+                peer.unref();
                 break;
             }
         }
@@ -445,7 +652,7 @@ pub const SyncManager = struct {
                 .node_id_hex = hex,
                 .desktop_name = try allocator.dupe(u8, peer.desktop_name),
                 .address = try allocator.dupe(u8, peer.address_str),
-                .status = if (peer.is_alive) "CONNECTED" else "DISCONNECTED",
+                .status = if (peer.is_alive and !peer.is_closed) "CONNECTED" else "DISCONNECTED",
                 .last_sync_hlc = peer.last_hlc,
             };
         }
