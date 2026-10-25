@@ -268,8 +268,194 @@ pub const Executor = struct {
         };
     }
 
+    fn stripTablePrefix(full_name: []const u8) []const u8 {
+        if (std.mem.indexOfScalar(u8, full_name, '.')) |dot_idx| {
+            return full_name[dot_idx + 1 ..];
+        }
+        return full_name;
+    }
+
+    const ProjTarget = struct {
+        is_right: bool,
+        col_idx: usize,
+    };
+
+    fn execSelectJoin(self: *Executor, s: ast.SelectStmt, left_table: *Table, join_clause: ast.JoinClause) !QueryResult {
+        const right_table = self.engine.getTable(join_clause.join_table) orelse return error.TableNotFound;
+
+        left_table.mutex.lock();
+        defer left_table.mutex.unlock();
+
+        right_table.mutex.lock();
+        defer right_table.mutex.unlock();
+
+        const col1_raw = stripTablePrefix(join_clause.left_col);
+        const col2_raw = stripTablePrefix(join_clause.right_col);
+
+        var left_key_idx: ?usize = null;
+        var right_key_idx: ?usize = null;
+
+        // Check if join_clause.left_col explicitly prefixes left_table vs right_table
+        if (std.mem.indexOfScalar(u8, join_clause.left_col, '.')) |dot_idx| {
+            const tname1 = join_clause.left_col[0..dot_idx];
+            if (std.ascii.eqlIgnoreCase(tname1, left_table.name)) {
+                left_key_idx = left_table.schema.getColumnIndex(col1_raw);
+                right_key_idx = right_table.schema.getColumnIndex(col2_raw);
+            } else if (std.ascii.eqlIgnoreCase(tname1, right_table.name)) {
+                right_key_idx = right_table.schema.getColumnIndex(col1_raw);
+                left_key_idx = left_table.schema.getColumnIndex(col2_raw);
+            }
+        }
+
+        if (left_key_idx == null or right_key_idx == null) {
+            if (std.mem.indexOfScalar(u8, join_clause.right_col, '.')) |dot_idx| {
+                const tname2 = join_clause.right_col[0..dot_idx];
+                if (std.ascii.eqlIgnoreCase(tname2, right_table.name)) {
+                    right_key_idx = right_table.schema.getColumnIndex(col2_raw);
+                    left_key_idx = left_table.schema.getColumnIndex(col1_raw);
+                } else if (std.ascii.eqlIgnoreCase(tname2, left_table.name)) {
+                    left_key_idx = left_table.schema.getColumnIndex(col2_raw);
+                    right_key_idx = right_table.schema.getColumnIndex(col1_raw);
+                }
+            }
+        }
+
+        if (left_key_idx == null or right_key_idx == null) {
+            if (left_table.schema.getColumnIndex(col1_raw)) |l_idx| {
+                if (right_table.schema.getColumnIndex(col2_raw)) |r_idx| {
+                    left_key_idx = l_idx;
+                    right_key_idx = r_idx;
+                }
+            }
+        }
+        if (left_key_idx == null or right_key_idx == null) {
+            if (left_table.schema.getColumnIndex(col2_raw)) |l_idx| {
+                if (right_table.schema.getColumnIndex(col1_raw)) |r_idx| {
+                    left_key_idx = l_idx;
+                    right_key_idx = r_idx;
+                }
+            }
+        }
+
+        if (left_key_idx == null or right_key_idx == null) return error.ColumnNotFound;
+        const l_key_idx = left_key_idx.?;
+        const r_key_idx = right_key_idx.?;
+
+        const MatchedPair = struct {
+            left: Row,
+            right: ?Row,
+        };
+
+        var matched_pairs = std.ArrayList(MatchedPair).init(self.allocator);
+        defer matched_pairs.deinit();
+
+        for (left_table.rows.items) |left_row| {
+            if (s.where) |where_expr| {
+                if (!try self.evalFilter(left_row, left_table.schema, where_expr)) {
+                    continue;
+                }
+            }
+
+            var found_any = false;
+            for (right_table.rows.items) |right_row| {
+                if (left_row.values[l_key_idx].compare(right_row.values[r_key_idx]) == .eq) {
+                    try matched_pairs.append(.{ .left = left_row, .right = right_row });
+                    found_any = true;
+                }
+            }
+
+            // Left join behavior: if no match in right table, still include left row with null right
+            if (!found_any) {
+                try matched_pairs.append(.{ .left = left_row, .right = null });
+            }
+        }
+
+        var count_to_take = matched_pairs.items.len;
+        if (s.limit) |lim| {
+            count_to_take = @min(count_to_take, lim);
+        }
+
+        // Projection
+        var col_names = std.ArrayList([]const u8).init(self.allocator);
+        var proj_targets = std.ArrayList(ProjTarget).init(self.allocator);
+        defer proj_targets.deinit();
+
+        for (s.items) |item| {
+            if (item.star) {
+                for (left_table.schema.columns, 0..) |col, idx| {
+                    const out_name = try std.fmt.allocPrint(self.allocator, "{s}_{s}", .{ left_table.name, col.name });
+                    try col_names.append(out_name);
+                    try proj_targets.append(.{ .is_right = false, .col_idx = idx });
+                }
+                for (right_table.schema.columns, 0..) |col, idx| {
+                    const out_name = try std.fmt.allocPrint(self.allocator, "{s}_{s}", .{ right_table.name, col.name });
+                    try col_names.append(out_name);
+                    try proj_targets.append(.{ .is_right = true, .col_idx = idx });
+                }
+            } else if (item.column_name) |cname| {
+                var target_is_right = false;
+                var target_idx: ?usize = null;
+
+                if (item.table_name) |tname| {
+                    if (std.ascii.eqlIgnoreCase(tname, left_table.name) or (tname.len == 1 and std.ascii.toLower(tname[0]) == std.ascii.toLower(left_table.name[0]))) {
+                        target_is_right = false;
+                        target_idx = left_table.schema.getColumnIndex(cname);
+                    } else if (std.ascii.eqlIgnoreCase(tname, right_table.name) or (tname.len == 1 and std.ascii.toLower(tname[0]) == std.ascii.toLower(right_table.name[0]))) {
+                        target_is_right = true;
+                        target_idx = right_table.schema.getColumnIndex(cname);
+                    }
+                }
+
+                if (target_idx == null) {
+                    if (left_table.schema.getColumnIndex(cname)) |l_idx| {
+                        target_is_right = false;
+                        target_idx = l_idx;
+                    } else if (right_table.schema.getColumnIndex(cname)) |r_idx| {
+                        target_is_right = true;
+                        target_idx = r_idx;
+                    }
+                }
+
+                if (target_idx == null) return error.ColumnNotFound;
+
+                const out_name = item.alias orelse cname;
+                try col_names.append(try self.allocator.dupe(u8, out_name));
+                try proj_targets.append(.{ .is_right = target_is_right, .col_idx = target_idx.? });
+            }
+        }
+
+        var result_rows = std.ArrayList([]Value).init(self.allocator);
+        errdefer result_rows.deinit();
+
+        for (matched_pairs.items[0..count_to_take]) |pair| {
+            var row_vals = try self.allocator.alloc(Value, proj_targets.items.len);
+            for (proj_targets.items, 0..) |t, i| {
+                if (!t.is_right) {
+                    row_vals[i] = try pair.left.values[t.col_idx].clone(self.allocator);
+                } else {
+                    if (pair.right) |r_row| {
+                        row_vals[i] = try r_row.values[t.col_idx].clone(self.allocator);
+                    } else {
+                        row_vals[i] = Value{ .null_val = {} };
+                    }
+                }
+            }
+            try result_rows.append(row_vals);
+        }
+
+        return QueryResult{
+            .allocator = self.allocator,
+            .columns = try col_names.toOwnedSlice(),
+            .rows = try result_rows.toOwnedSlice(),
+        };
+    }
+
     fn execSelect(self: *Executor, s: ast.SelectStmt) !QueryResult {
         const table = self.engine.getTable(s.from_table) orelse return error.TableNotFound;
+
+        if (s.join) |join_clause| {
+            return try self.execSelectJoin(s, table, join_clause);
+        }
 
         table.mutex.lock();
         defer table.mutex.unlock();
@@ -338,7 +524,8 @@ pub const Executor = struct {
                 }
             } else if (item.column_name) |cname| {
                 const idx = table.schema.getColumnIndex(cname) orelse return error.ColumnNotFound;
-                try col_names.append(try self.allocator.dupe(u8, cname));
+                const out_name = item.alias orelse cname;
+                try col_names.append(try self.allocator.dupe(u8, out_name));
                 try col_indices.append(idx);
             }
         }

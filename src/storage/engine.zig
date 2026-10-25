@@ -12,6 +12,7 @@ const ChangeLog = cdc.ChangeLog;
 const crdt = @import("../sync/crdt.zig");
 const ConflictResolution = crdt.ConflictResolution;
 const MetadataManager = @import("metadata.zig").MetadataManager;
+pub const ModelManager = @import("models.zig").ModelManager;
 const protocol = @import("../sync/protocol.zig");
 const TableSnapshot = protocol.TableSnapshot;
 const ColumnDesc = protocol.ColumnDesc;
@@ -31,6 +32,7 @@ pub const Engine = struct {
     cdc_log: *ChangeLog,
     wal: ?*WAL,
     metadata: *MetadataManager,
+    models: *ModelManager,
     mutex: std.Thread.Mutex,
 
     // Mutation and DDL listeners for real-time peer streaming
@@ -70,6 +72,9 @@ pub const Engine = struct {
         const metadata = try MetadataManager.init(allocator, data_dir);
         errdefer metadata.deinit();
 
+        const models = try ModelManager.init(allocator, data_dir);
+        errdefer models.deinit();
+
         engine.* = Engine{
             .allocator = allocator,
             .data_dir = duped_dir,
@@ -80,6 +85,7 @@ pub const Engine = struct {
             .cdc_log = cdc_log,
             .wal = wal,
             .metadata = metadata,
+            .models = models,
             .mutex = std.Thread.Mutex{},
         };
 
@@ -100,6 +106,7 @@ pub const Engine = struct {
         }
         self.tables.deinit();
 
+        self.models.deinit();
         self.metadata.deinit();
 
         if (self.wal) |w| {

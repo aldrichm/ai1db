@@ -251,6 +251,22 @@ pub const WebServer = struct {
             }
         } else if (std.mem.eql(u8, method, "POST") and std.mem.eql(u8, path, "/api/sync/trigger")) {
             self.serveSyncTrigger(stream);
+        } else if (std.mem.eql(u8, method, "GET") and std.mem.eql(u8, path, "/api/models")) {
+            self.serveModelsList(stream);
+        } else if (std.mem.eql(u8, method, "POST") and std.mem.eql(u8, path, "/api/models/save")) {
+            if (std.mem.indexOf(u8, request, "\r\n\r\n")) |body_idx| {
+                const body = request[body_idx + 4 ..];
+                self.serveModelsSave(stream, body);
+            } else {
+                sendError(stream, 400, "Bad Request");
+            }
+        } else if (std.mem.eql(u8, method, "POST") and std.mem.eql(u8, path, "/api/models/delete")) {
+            if (std.mem.indexOf(u8, request, "\r\n\r\n")) |body_idx| {
+                const body = request[body_idx + 4 ..];
+                self.serveModelsDelete(stream, body);
+            } else {
+                sendError(stream, 400, "Bad Request");
+            }
         } else {
             sendError(stream, 404, "Not Found");
         }
@@ -1300,6 +1316,429 @@ pub const WebServer = struct {
             \\      color: #38bdf8;
             \\      font-weight: 700;
             \\    }
+            \\
+            \\    /* ========================================================
+            \\       DATA MODELS & UI BUILDER STYLES
+            \\       ======================================================== */
+            \\    .models-layout {
+            \\      display: flex;
+            \\      flex-direction: column;
+            \\      gap: 14px;
+            \\      width: 100%;
+            \\    }
+            \\    .models-toolbar {
+            \\      display: flex;
+            \\      flex-wrap: wrap;
+            \\      justify-content: space-between;
+            \\      align-items: center;
+            \\      gap: 12px;
+            \\      padding: 12px 16px;
+            \\      background: var(--card);
+            \\      border: 1px solid var(--card-border);
+            \\      border-radius: 8px;
+            \\    }
+            \\    .models-toolbar-left, .models-toolbar-right {
+            \\      display: flex;
+            \\      align-items: center;
+            \\      gap: 10px;
+            \\      flex-wrap: wrap;
+            \\    }
+            \\    .subview-toggle {
+            \\      display: flex;
+            \\      background: #0b1120;
+            \\      border: 1px solid #1e293b;
+            \\      border-radius: 6px;
+            \\      overflow: hidden;
+            \\    }
+            \\    .subview-btn {
+            \\      background: transparent;
+            \\      border: none;
+            \\      color: var(--text-muted);
+            \\      padding: 6px 14px;
+            \\      font-size: 12px;
+            \\      font-weight: 600;
+            \\      cursor: pointer;
+            \\      display: flex;
+            \\      align-items: center;
+            \\      gap: 6px;
+            \\      transition: all 0.15s ease;
+            \\    }
+            \\    .subview-btn:hover {
+            \\      color: #fff;
+            \\      background: rgba(255, 255, 255, 0.04);
+            \\    }
+            \\    .subview-btn.active {
+            \\      background: #0284c7;
+            \\      color: #fff;
+            \\    }
+            \\    .btn-gradient {
+            \\      background: linear-gradient(135deg, #0284c7, #38bdf8);
+            \\      color: #000 !important;
+            \\      font-weight: 700 !important;
+            \\      border: none !important;
+            \\      box-shadow: 0 2px 10px rgba(56, 189, 248, 0.3);
+            \\    }
+            \\    .btn-gradient:hover {
+            \\      filter: brightness(1.15);
+            \\      box-shadow: 0 4px 14px rgba(56, 189, 248, 0.45);
+            \\    }
+            \\
+            \\    /* Canvas split layout */
+            \\    .builder-container {
+            \\      display: grid;
+            \\      grid-template-columns: 280px 1fr;
+            \\      gap: 16px;
+            \\      align-items: start;
+            \\    }
+            \\    @media (max-width: 1024px) {
+            \\      .builder-container { grid-template-columns: 1fr; }
+            \\    }
+            \\
+            \\    /* Palette */
+            \\    .palette-panel {
+            \\      background: var(--card);
+            \\      border: 1px solid var(--card-border);
+            \\      border-radius: 8px;
+            \\      padding: 14px;
+            \\      display: flex;
+            \\      flex-direction: column;
+            \\      gap: 10px;
+            \\      max-height: 720px;
+            \\    }
+            \\    .palette-search {
+            \\      margin-bottom: 4px;
+            \\    }
+            \\    .palette-list {
+            \\      overflow-y: auto;
+            \\      display: flex;
+            \\      flex-direction: column;
+            \\      gap: 8px;
+            \\      padding-right: 4px;
+            \\      max-height: 600px;
+            \\    }
+            \\    .palette-item {
+            \\      padding: 9px 12px;
+            \\      background: rgba(15, 23, 42, 0.6);
+            \\      border: 1px dashed #334155;
+            \\      border-radius: 6px;
+            \\      cursor: grab;
+            \\      user-select: none;
+            \\      display: flex;
+            \\      justify-content: space-between;
+            \\      align-items: center;
+            \\      transition: all 0.15s ease;
+            \\    }
+            \\    .palette-item:hover {
+            \\      background: #1e293b;
+            \\      border-color: var(--accent);
+            \\      transform: translateY(-1px);
+            \\    }
+            \\    .palette-item:active {
+            \\      cursor: grabbing;
+            \\    }
+            \\
+            \\    /* Canvas area */
+            \\    .canvas-panel {
+            \\      position: relative;
+            \\      background: var(--card);
+            \\      border: 1px solid var(--card-border);
+            \\      border-radius: 8px;
+            \\      overflow: hidden;
+            \\      display: flex;
+            \\      flex-direction: column;
+            \\    }
+            \\    .canvas-viewport {
+            \\      position: relative;
+            \\      width: 100%;
+            \\      height: 640px;
+            \\      overflow: auto;
+            \\      background-color: #070d19;
+            \\      background-image: radial-gradient(rgba(56, 189, 248, 0.12) 1.5px, transparent 1.5px);
+            \\      background-size: 24px 24px;
+            \\      user-select: none;
+            \\    }
+            \\    .canvas-world {
+            \\      position: relative;
+            \\      width: 2400px;
+            \\      height: 1600px;
+            \\    }
+            \\    .canvas-svg {
+            \\      position: absolute;
+            \\      top: 0;
+            \\      left: 0;
+            \\      width: 100%;
+            \\      height: 100%;
+            \\      pointer-events: none;
+            \\      z-index: 10;
+            \\    }
+            \\
+            \\    /* Table Node Card in Canvas */
+            \\    .model-card {
+            \\      position: absolute;
+            \\      width: 260px;
+            \\      background: #0f172a;
+            \\      border: 1px solid #334155;
+            \\      border-radius: 8px;
+            \\      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.7);
+            \\      z-index: 20;
+            \\      cursor: default;
+            \\      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+            \\    }
+            \\    .model-card:hover {
+            \\      border-color: #38bdf8;
+            \\      box-shadow: 0 12px 30px rgba(56, 189, 248, 0.2);
+            \\    }
+            \\    .model-card.active-table {
+            \\      border-color: #38bdf8;
+            \\      box-shadow: 0 0 0 2px var(--accent-glow);
+            \\    }
+            \\    .model-card-header {
+            \\      padding: 8px 12px;
+            \\      background: #1e293b;
+            \\      border-bottom: 1px solid #334155;
+            \\      border-radius: 7px 7px 0 0;
+            \\      display: flex;
+            \\      justify-content: space-between;
+            \\      align-items: center;
+            \\      cursor: move;
+            \\    }
+            \\    .model-card-title {
+            \\      font-weight: 700;
+            \\      font-size: 13px;
+            \\      color: #fff;
+            \\      display: flex;
+            \\      align-items: center;
+            \\      gap: 6px;
+            \\    }
+            \\    .model-card-close {
+            \\      cursor: pointer;
+            \\      color: #94a3b8;
+            \\      font-size: 14px;
+            \\      line-height: 1;
+            \\      padding: 2px 4px;
+            \\      border-radius: 3px;
+            \\    }
+            \\    .model-card-close:hover {
+            \\      color: #ef4444;
+            \\      background: rgba(239, 68, 68, 0.15);
+            \\    }
+            \\    .model-card-columns {
+            \\      padding: 4px 0;
+            \\      max-height: 280px;
+            \\      overflow-y: auto;
+            \\    }
+            \\    .model-col-row {
+            \\      position: relative;
+            \\      display: flex;
+            \\      align-items: center;
+            \\      padding: 5px 12px;
+            \\      gap: 6px;
+            \\      font-size: 12px;
+            \\      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+            \\    }
+            \\    .model-col-row:hover {
+            \\      background: rgba(255, 255, 255, 0.04);
+            \\    }
+            \\    .model-col-name {
+            \\      flex: 1;
+            \\      font-weight: 600;
+            \\      color: #e2e8f0;
+            \\      white-space: nowrap;
+            \\      overflow: hidden;
+            \\      text-overflow: ellipsis;
+            \\    }
+            \\    .model-col-type {
+            \\      font-size: 10px;
+            \\      color: #94a3b8;
+            \\      background: rgba(148, 163, 184, 0.1);
+            \\      padding: 1px 4px;
+            \\      border-radius: 3px;
+            \\      font-family: monospace;
+            \\    }
+            \\    .model-col-alias {
+            \\      width: 55px;
+            \\      background: #020617;
+            \\      border: 1px solid #334155;
+            \\      color: #7dd3fc;
+            \\      border-radius: 3px;
+            \\      padding: 2px 4px;
+            \\      font-size: 10px;
+            \\      font-family: monospace;
+            \\      outline: none;
+            \\    }
+            \\    .model-col-alias:focus {
+            \\      border-color: #38bdf8;
+            \\    }
+            \\
+            \\    /* Port handles */
+            \\    .port-anchor {
+            \\      position: absolute;
+            \\      width: 12px;
+            \\      height: 12px;
+            \\      border-radius: 50%;
+            \\      background: #0284c7;
+            \\      border: 2px solid #0f172a;
+            \\      cursor: crosshair;
+            \\      z-index: 30;
+            \\      transition: transform 0.15s, background 0.15s;
+            \\    }
+            \\    .port-anchor:hover, .port-anchor.port-connecting {
+            \\      background: #38bdf8;
+            \\      transform: scale(1.4);
+            \\      box-shadow: 0 0 8px #38bdf8;
+            \\    }
+            \\    .port-anchor.port-left { left: -6px; }
+            \\    .port-anchor.port-right { right: -6px; }
+            \\
+            \\    /* SVG link lines */
+            \\    .link-path {
+            \\      fill: none;
+            \\      stroke: #38bdf8;
+            \\      stroke-width: 2.5;
+            \\      pointer-events: stroke;
+            \\      cursor: pointer;
+            \\      transition: stroke 0.15s, stroke-width 0.15s;
+            \\    }
+            \\    .link-path:hover {
+            \\      stroke: #f43f5e;
+            \\      stroke-width: 3.5;
+            \\    }
+            \\    .link-temp {
+            \\      fill: none;
+            \\      stroke: #f59e0b;
+            \\      stroke-width: 2.5;
+            \\      stroke-dasharray: 4 4;
+            \\    }
+            \\
+            \\    /* Relationships bar under canvas */
+            \\    .canvas-links-bar {
+            \\      padding: 10px 14px;
+            \\      background: #090e1a;
+            \\      border-top: 1px solid var(--card-border);
+            \\      display: flex;
+            \\      align-items: center;
+            \\      gap: 12px;
+            \\      overflow-x: auto;
+            \\      font-size: 12px;
+            \\    }
+            \\    .link-badge {
+            \\      display: inline-flex;
+            \\      align-items: center;
+            \\      gap: 6px;
+            \\      background: #1e293b;
+            \\      border: 1px solid #334155;
+            \\      padding: 3px 8px;
+            \\      border-radius: 14px;
+            \\      color: #e2e8f0;
+            \\      white-space: nowrap;
+            \\    }
+            \\    .link-badge-del {
+            \\      cursor: pointer;
+            \\      color: #94a3b8;
+            \\      font-weight: 700;
+            \\    }
+            \\    .link-badge-del:hover {
+            \\      color: #ef4444;
+            \\    }
+            \\
+            \\    /* Generated App View */
+            \\    .generated-app-layout {
+            \\      display: flex;
+            \\      flex-direction: column;
+            \\      gap: 16px;
+            \\    }
+            \\    .app-header-card {
+            \\      background: var(--card);
+            \\      border: 1px solid var(--card-border);
+            \\      border-radius: 8px;
+            \\      padding: 14px 18px;
+            \\      display: flex;
+            \\      justify-content: space-between;
+            \\      align-items: center;
+            \\      flex-wrap: wrap;
+            \\      gap: 12px;
+            \\    }
+            \\    .app-title-group {
+            \\      display: flex;
+            \\      align-items: center;
+            \\      gap: 12px;
+            \\    }
+            \\    .app-mode-tabs {
+            \\      display: flex;
+            \\      background: #0b1120;
+            \\      border: 1px solid #1e293b;
+            \\      border-radius: 6px;
+            \\      overflow: hidden;
+            \\    }
+            \\    .app-mode-tab {
+            \\      background: transparent;
+            \\      border: none;
+            \\      color: var(--text-muted);
+            \\      padding: 6px 14px;
+            \\      font-size: 12px;
+            \\      font-weight: 600;
+            \\      cursor: pointer;
+            \\      display: flex;
+            \\      align-items: center;
+            \\      gap: 6px;
+            \\      transition: all 0.15s ease;
+            \\    }
+            \\    .app-mode-tab.active {
+            \\      background: #0284c7;
+            \\      color: #fff;
+            \\    }
+            \\
+            \\    /* Master-Detail Panels */
+            \\    .master-detail-container {
+            \\      display: flex;
+            \\      flex-direction: column;
+            \\      gap: 16px;
+            \\    }
+            \\    .master-card {
+            \\      background: var(--card);
+            \\      border: 1px solid var(--card-border);
+            \\      border-radius: 8px;
+            \\      padding: 16px;
+            \\      display: flex;
+            \\      flex-direction: column;
+            \\      gap: 12px;
+            \\    }
+            \\    .selected-master-row td {
+            \\      background: rgba(56, 189, 248, 0.12) !important;
+            \\      border-color: rgba(56, 189, 248, 0.4) !important;
+            \\      color: #fff !important;
+            \\      font-weight: 600;
+            \\    }
+            \\    .detail-card {
+            \\      background: var(--card);
+            \\      border: 1px solid var(--card-border);
+            \\      border-radius: 8px;
+            \\      padding: 16px;
+            \\      display: flex;
+            \\      flex-direction: column;
+            \\      gap: 12px;
+            \\    }
+            \\    .child-tabs {
+            \\      display: flex;
+            \\      gap: 6px;
+            \\      border-bottom: 1px solid var(--card-border);
+            \\      padding-bottom: 8px;
+            \\    }
+            \\    .child-tab {
+            \\      background: #1e293b;
+            \\      border: 1px solid #334155;
+            \\      color: var(--text-muted);
+            \\      padding: 5px 12px;
+            \\      border-radius: 6px;
+            \\      font-size: 12px;
+            \\      cursor: pointer;
+            \\      transition: all 0.15s ease;
+            \\    }
+            \\    .child-tab.active {
+            \\      background: #0284c7;
+            \\      color: #fff;
+            \\      border-color: #38bdf8;
+            \\    }
             \\  </style>
             \\</head>
             \\<body>
@@ -1354,6 +1793,9 @@ pub const WebServer = struct {
             \\    </button>
             \\    <button id="tabBtnTableData" class="nav-tab" onclick="switchMainTab('tableData')">
             \\      <span>📊</span> Table Data Editor
+            \\    </button>
+            \\    <button id="tabBtnModels" class="nav-tab" onclick="switchMainTab('models')">
+            \\      <span>📐</span> Data Models &amp; UI Builder
             \\    </button>
             \\  </div>
             \\
@@ -1999,6 +2441,269 @@ pub const WebServer = struct {
             \\    </div>
             \\  </div>
             \\
+            \\  <!-- Data Models & UI Builder View -->
+            \\  <div id="modelsView" class="models-layout" style="display: none;">
+            \\    <!-- Top Control Bar -->
+            \\    <div class="models-toolbar">
+            \\      <div class="models-toolbar-left">
+            \\        <label class="form-label" style="margin: 0;">Model:</label>
+            \\        <select id="modelSelector" class="form-control" style="width: auto; min-width: 180px;" onchange="onModelSelectChange()">
+            \\          <option value="">&mdash; New Data Model &mdash;</option>
+            \\        </select>
+            \\        <input type="text" id="modelNameInput" class="form-control" style="width: 200px;" placeholder="Model Name (e.g. SalesOrders)" />
+            \\        <button class="btn-primary btn-sm" onclick="saveCurrentModel()">💾 Save</button>
+            \\        <button id="modelDeleteBtn" class="btn-danger btn-sm" onclick="deleteCurrentModel()" style="display: none;">🗑️ Delete</button>
+            \\        <button class="btn-secondary btn-sm" onclick="clearModelCanvas()">🧹 Clear</button>
+            \\        <button class="btn-secondary btn-sm" onclick="autoDetectModelLinks()">🔗 Auto-Detect Links</button>
+            \\        <button class="btn-secondary btn-sm" onclick="showModelSqlModal()">👁️ SQL View</button>
+            \\      </div>
+            \\
+            \\      <div class="models-toolbar-right">
+            \\        <label style="font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 5px; cursor: pointer;">
+            \\          <input type="checkbox" id="autoGenerateUiCheck" checked onchange="onAutoGenerateToggle()" />
+            \\          Auto-Sync UI
+            \\        </label>
+            \\        <div class="subview-toggle">
+            \\          <button id="subviewBtnBuilder" class="subview-btn active" onclick="switchModelSubView('builder')">
+            \\            <span>📐</span> Canvas Builder
+            \\          </button>
+            \\          <button id="subviewBtnApp" class="subview-btn" onclick="switchModelSubView('app')">
+            \\            <span>⚡</span> Generated App UI
+            \\          </button>
+            \\        </div>
+            \\        <button class="btn-primary btn-sm btn-gradient" onclick="generateAppUiFromModel(true)">
+            \\          ⚡ Generate App UI
+            \\        </button>
+            \\      </div>
+            \\    </div>
+            \\
+            \\    <!-- Alert banner -->
+            \\    <div id="modelAlert" class="alert-box" style="display: none;"></div>
+            \\
+            \\    <!-- Sub-View 1: Canvas Builder -->
+            \\    <div id="modelCanvasLayout" class="builder-container">
+            \\      <!-- Left Table Palette -->
+            \\      <div class="palette-panel">
+            \\        <div style="display: flex; justify-content: space-between; align-items: center;">
+            \\          <h3 style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin: 0;">Tables Palette</h3>
+            \\          <span id="paletteTableCount" style="font-size: 11px; color: var(--accent);">0 Tables</span>
+            \\        </div>
+            \\        <div class="palette-search">
+            \\          <input type="text" id="paletteSearchInput" class="form-control" style="padding: 5px 8px; font-size: 12px;" placeholder="Filter tables..." oninput="renderModelPalette()" />
+            \\        </div>
+            \\        <div style="font-size: 11px; color: #94a3b8; line-height: 1.3;">
+            \\          Drag a table onto the canvas or click <strong>+</strong> to add.
+            \\        </div>
+            \\        <div id="modelPaletteList" class="palette-list">
+            \\          <!-- Dynamically populated -->
+            \\        </div>
+            \\      </div>
+            \\
+            \\      <!-- Right Interactive Canvas -->
+            \\      <div class="canvas-panel">
+            \\        <div style="padding: 8px 14px; background: #0f172a; border-bottom: 1px solid var(--card-border); display: flex; justify-content: space-between; align-items: center;">
+            \\          <span style="font-size: 12px; color: #cbd5e1;">
+            \\            💡 <strong>Link Builder:</strong> Click any column's port circle <span style="color:#38bdf8;">●</span> on Table A, then click a port on Table B to connect PK / FK.
+            \\          </span>
+            \\          <span id="canvasSummaryText" style="font-size: 11px; color: var(--text-muted);">0 Tables &bull; 0 Links</span>
+            \\        </div>
+            \\
+            \\        <div id="canvasViewport" class="canvas-viewport" ondragover="onCanvasDragOver(event)" ondrop="onCanvasDrop(event)" onclick="onCanvasClick(event)" onmousemove="onCanvasMouseMove(event)">
+            \\          <div id="canvasWorld" class="canvas-world">
+            \\            <svg id="modelCanvasSvg" class="canvas-svg">
+            \\              <defs>
+            \\                <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            \\                  <path d="M 0 1 L 10 5 L 0 9 z" fill="#38bdf8" />
+            \\                </marker>
+            \\              </defs>
+            \\              <!-- Dynamic Link Paths rendered here -->
+            \\              <g id="svgLinksGroup"></g>
+            \\              <!-- Interactive Link Badges rendered here -->
+            \\              <g id="svgBadgesGroup"></g>
+            \\              <!-- Temporary wire while drawing -->
+            \\              <path id="tempWirePath" class="link-temp" d="" style="display: none;" />
+            \\            </svg>
+            \\
+            \\            <!-- Table Cards container -->
+            \\            <div id="canvasCardsContainer"></div>
+            \\          </div>
+            \\        </div>
+            \\
+            \\        <!-- Links Summary Bar -->
+            \\        <div class="canvas-links-bar" id="canvasLinksBar">
+            \\          <span style="color: var(--text-muted); font-size: 11px;">Relationships:</span>
+            \\          <span id="canvasLinksList" style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            \\            <em style="color: #64748b; font-size: 11px;">No relationships yet. Connect table ports to link tables.</em>
+            \\          </span>
+            \\        </div>
+            \\      </div>
+            \\    </div>
+            \\
+            \\    <!-- Sub-View 2: Generated App UI -->
+            \\    <div id="modelAppLayout" class="generated-app-layout" style="display: none;">
+            \\      <div class="app-header-card">
+            \\        <div class="app-title-group">
+            \\          <span style="font-size: 20px;">⚡</span>
+            \\          <div>
+            \\            <h2 id="generatedAppTitle" style="font-size: 16px; font-weight: 700; color: #fff; margin: 0;">Generated Application: Untitled</h2>
+            \\            <div id="generatedAppSubtitle" style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+            \\              Dynamic Multi-Entity Model Application
+            \\            </div>
+            \\          </div>
+            \\        </div>
+            \\
+            \\        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            \\          <div style="display: flex; align-items: center; gap: 6px;">
+            \\            <label class="form-label" style="margin: 0;">Master Table:</label>
+            \\            <select id="appMasterTableSelect" class="form-control" style="width: auto; padding: 4px 10px; font-size: 12px;" onchange="changeAppMasterTable(this.value)">
+            \\              <!-- Populated dynamically -->
+            \\            </select>
+            \\          </div>
+            \\
+            \\          <div class="app-mode-tabs">
+            \\            <button id="appTabBtnMasterDetail" class="app-mode-tab active" onclick="switchAppViewTab('masterDetail')">
+            \\              <span>👥</span> Master-Detail Live App
+            \\            </button>
+            \\            <button id="appTabBtnJoinedGrid" class="app-mode-tab" onclick="switchAppViewTab('joinedGrid')">
+            \\              <span>📋</span> Unified Joined View
+            \\            </button>
+            \\          </div>
+            \\
+            \\          <button class="btn-secondary btn-sm" onclick="refreshGeneratedAppData()">
+            \\            🔄 Refresh
+            \\          </button>
+            \\          <button class="btn-secondary btn-sm" onclick="switchModelSubView('builder')">
+            \\            ✏️ Back to Builder
+            \\          </button>
+            \\        </div>
+            \\      </div>
+            \\
+            \\      <!-- Mode 1: Master-Detail Live Application Panel -->
+            \\      <div id="appMasterDetailPanel" class="master-detail-container">
+            \\        <!-- Master Entity Table Card -->
+            \\        <div class="master-card">
+            \\          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+            \\            <div>
+            \\              <h3 id="masterTableHeading" style="font-size: 13px; font-weight: 700; color: var(--accent); margin: 0; text-transform: uppercase; letter-spacing: 0.05em;">
+            \\                Master Table: Customers
+            \\              </h3>
+            \\              <div id="masterTableMeta" style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">
+            \\                Select a row to inspect and filter child details below
+            \\              </div>
+            \\            </div>
+            \\            <div style="display: flex; align-items: center; gap: 8px;">
+            \\              <input type="text" id="masterSearchInput" class="form-control" style="width: 180px; padding: 4px 8px; font-size: 12px;" placeholder="Search master rows..." oninput="filterMasterRows()" />
+            \\              <button id="masterAddBtn" class="btn-primary btn-sm" onclick="openModelRecordModal('master')">
+            \\                ➕ New Record
+            \\              </button>
+            \\            </div>
+            \\          </div>
+            \\
+            \\          <div class="table-container" style="max-height: 280px; overflow-y: auto;">
+            \\            <table>
+            \\              <thead id="masterThead"></thead>
+            \\              <tbody id="masterTbody"></tbody>
+            \\            </table>
+            \\          </div>
+            \\        </div>
+            \\
+            \\        <!-- Detail / Child Tables Card -->
+            \\        <div class="detail-card">
+            \\          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+            \\            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            \\              <h3 style="font-size: 13px; font-weight: 700; color: #10b981; margin: 0; text-transform: uppercase; letter-spacing: 0.05em;">
+            \\                Linked Details
+            \\              </h3>
+            \\              <div id="childTabsContainer" class="child-tabs">
+            \\                <!-- Tabs for each child table -->
+            \\              </div>
+            \\            </div>
+            \\            <div style="display: flex; align-items: center; gap: 8px;">
+            \\              <span id="childRelationBadge" style="font-size: 11px; color: var(--text-muted); background: rgba(255,255,255,0.05); padding: 3px 8px; border-radius: 4px;"></span>
+            \\              <button id="childAddBtn" class="btn-primary btn-sm" onclick="openModelRecordModal('child')">
+            \\                ➕ Add Linked Record
+            \\              </button>
+            \\            </div>
+            \\          </div>
+            \\
+            \\          <div class="table-container" style="max-height: 320px; overflow-y: auto;">
+            \\            <table>
+            \\              <thead id="childThead"></thead>
+            \\              <tbody id="childTbody"></tbody>
+            \\            </table>
+            \\          </div>
+            \\        </div>
+            \\      </div>
+            \\
+            \\      <!-- Mode 2: Denormalized Joined Data View Panel -->
+            \\      <div id="appJoinedGridPanel" class="master-card" style="display: none;">
+            \\        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+            \\          <div>
+            \\            <h3 style="font-size: 13px; font-weight: 700; color: #a855f7; margin: 0; text-transform: uppercase; letter-spacing: 0.05em;">
+              \\              Unified Denormalized Model View
+            \\            </h3>
+            \\            <span id="joinedGridMeta" style="font-size: 11px; color: var(--text-muted);">
+            \\              Executing dynamic multi-table join across all connected entities
+            \\            </span>
+            \\          </div>
+            \\          <div style="display: flex; align-items: center; gap: 8px;">
+            \\            <input type="text" id="joinedSearchInput" class="form-control" style="width: 200px; padding: 4px 8px; font-size: 12px;" placeholder="Search joined rows..." oninput="filterJoinedRows()" />
+            \\            <button class="btn-secondary btn-sm" onclick="exportJoinedData('csv')">📥 Export CSV</button>
+            \\            <button class="btn-secondary btn-sm" onclick="exportJoinedData('json')">📥 Export JSON</button>
+            \\            <button class="btn-secondary btn-sm" onclick="showModelSqlModal()">👁️ SQL Statement</button>
+            \\          </div>
+            \\        </div>
+            \\
+            \\        <div class="table-container" style="max-height: 500px; overflow-y: auto;">
+            \\          <table>
+            \\            <thead id="joinedThead"></thead>
+            \\            <tbody id="joinedTbody"></tbody>
+            \\          </table>
+            \\        </div>
+            \\      </div>
+            \\    </div>
+            \\  </div>
+            \\
+            \\  <!-- SQL View Preview Modal -->
+            \\  <div id="modelSqlModal" class="modal-overlay" style="display: none;">
+            \\    <div class="modal-content" style="max-width: 680px;">
+            \\      <div class="section-header" style="margin-bottom: 12px;">
+            \\        <h3 style="color: #38bdf8;">Generated SQL View Definition</h3>
+            \\        <button class="btn-secondary btn-sm" onclick="closeModelSqlModal()">✕</button>
+            \\      </div>
+            \\      <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;">
+            \\        This SQL statement represents the denormalized database view synthesized directly from your visual data model and relationship graph.
+            \\      </p>
+            \\      <div style="background: #050811; border: 1px solid #334155; border-radius: 6px; padding: 12px; margin-bottom: 14px;">
+            \\        <pre id="modelSqlCode" style="color: #7dd3fc; font-family: monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; margin: 0;"></pre>
+            \\      </div>
+            \\      <div style="display: flex; justify-content: flex-end; gap: 8px;">
+            \\        <button id="copyModelSqlBtn" class="btn-secondary btn-sm" onclick="copyModelSql()">📋 Copy SQL</button>
+            \\        <button class="btn-primary btn-sm" onclick="runModelSqlInConsole()">⚡ Run in SQL Console</button>
+            \\        <button class="btn-secondary btn-sm" onclick="closeModelSqlModal()">Close</button>
+            \\      </div>
+            \\    </div>
+            \\  </div>
+            \\
+            \\  <!-- Smart CRUD Form Modal for Model Entities -->
+            \\  <div id="modelCrudModal" class="modal-overlay" style="display: none;">
+            \\    <div class="modal-content" style="max-width: 580px;">
+            \\      <div class="section-header" style="margin-bottom: 12px;">
+            \\        <h3 id="modelCrudModalTitle" style="color: #38bdf8;">Add Record</h3>
+            \\        <button class="btn-secondary btn-sm" onclick="closeModelCrudModal()">✕</button>
+            \\      </div>
+            \\      <form id="modelCrudForm" onsubmit="submitModelCrud(event)">
+            \\        <div id="modelCrudFieldsContainer" style="display: flex; flex-direction: column; gap: 10px; max-height: 420px; overflow-y: auto; padding-right: 4px;">
+            \\          <!-- Dynamically generated fields with smart FK dropdowns -->
+            \\        </div>
+            \\        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+            \\          <button type="button" class="btn-secondary btn-sm" onclick="closeModelCrudModal()">Cancel</button>
+            \\          <button type="submit" id="modelCrudSubmitBtn" class="btn-primary btn-sm">Save Record</button>
+            \\        </div>
+            \\      </form>
+            \\    </div>
+            \\  </div>
+            \\
             \\  <script>
             \\    let knownTables = [];
             \\    let selectedTypeaheadIndex = 0;
@@ -2095,24 +2800,30 @@ pub const WebServer = struct {
             \\      const sqlView = document.getElementById('sqlView');
             \\      const studioView = document.getElementById('studioView');
             \\      const tableDataView = document.getElementById('tableDataView');
+            \\      const modelsView = document.getElementById('modelsView');
             \\      const tabBtnSql = document.getElementById('tabBtnSql');
             \\      const tabBtnStudio = document.getElementById('tabBtnStudio');
             \\      const tabBtnTableData = document.getElementById('tabBtnTableData');
+            \\      const tabBtnModels = document.getElementById('tabBtnModels');
             \\
             \\      if (tab === 'sql') {
             \\        if (sqlView) sqlView.style.display = 'grid';
             \\        if (studioView) studioView.style.display = 'none';
             \\        if (tableDataView) tableDataView.style.display = 'none';
+            \\        if (modelsView) modelsView.style.display = 'none';
             \\        if (tabBtnSql) tabBtnSql.classList.add('active');
             \\        if (tabBtnStudio) tabBtnStudio.classList.remove('active');
             \\        if (tabBtnTableData) tabBtnTableData.classList.remove('active');
+            \\        if (tabBtnModels) tabBtnModels.classList.remove('active');
             \\      } else if (tab === 'studio') {
             \\        if (sqlView) sqlView.style.display = 'none';
             \\        if (studioView) studioView.style.display = 'grid';
             \\        if (tableDataView) tableDataView.style.display = 'none';
+            \\        if (modelsView) modelsView.style.display = 'none';
             \\        if (tabBtnSql) tabBtnSql.classList.remove('active');
             \\        if (tabBtnStudio) tabBtnStudio.classList.add('active');
             \\        if (tabBtnTableData) tabBtnTableData.classList.remove('active');
+            \\        if (tabBtnModels) tabBtnModels.classList.remove('active');
             \\        renderStudioCatalog();
             \\        if (!currentStudioTable && studioMode !== 'create') {
             \\          if (knownTables && knownTables.length > 0) {
@@ -2130,10 +2841,22 @@ pub const WebServer = struct {
             \\        if (sqlView) sqlView.style.display = 'none';
             \\        if (studioView) studioView.style.display = 'none';
             \\        if (tableDataView) tableDataView.style.display = 'flex';
+            \\        if (modelsView) modelsView.style.display = 'none';
             \\        if (tabBtnSql) tabBtnSql.classList.remove('active');
             \\        if (tabBtnStudio) tabBtnStudio.classList.remove('active');
             \\        if (tabBtnTableData) tabBtnTableData.classList.add('active');
+            \\        if (tabBtnModels) tabBtnModels.classList.remove('active');
             \\        updateTableDataTableSelect();
+            \\      } else if (tab === 'models') {
+            \\        if (sqlView) sqlView.style.display = 'none';
+            \\        if (studioView) studioView.style.display = 'none';
+            \\        if (tableDataView) tableDataView.style.display = 'none';
+            \\        if (modelsView) modelsView.style.display = 'flex';
+            \\        if (tabBtnSql) tabBtnSql.classList.remove('active');
+            \\        if (tabBtnStudio) tabBtnStudio.classList.remove('active');
+            \\        if (tabBtnTableData) tabBtnTableData.classList.remove('active');
+            \\        if (tabBtnModels) tabBtnModels.classList.add('active');
+            \\        initModelBuilder();
             \\      }
             \\    }
             \\
@@ -2900,6 +3623,7 @@ pub const WebServer = struct {
             \\        renderSchemaList();
             \\        renderStudioCatalog();
             \\        updateTableDataTableSelect();
+            \\        renderModelPalette();
             \\        if (currentStudioTable) {
             \\          const cur = knownTables.find(t => t.name.toLowerCase() === currentStudioTable.toLowerCase());
             \\          if (cur) {
@@ -4699,15 +5423,1343 @@ pub const WebServer = struct {
             \\      }
             \\    }
             \\
+            \\    // ==========================================
+            \\    // DATA MODELS & UI BUILDER LOGIC
+            \\    // ==========================================
+            \\    let currentModel = {
+            \\      name: '',
+            \\      masterTable: '',
+            \\      tables: [],
+            \\      links: []
+            \\    };
+            \\    let savedModelsList = [];
+            \\    let modelSubView = 'builder';
+            \\    let autoRegenerateUi = true;
+            \\    let pendingPort = null;
+            \\    let draggingCard = null;
+            \\
+            \\    let currentAppMode = 'masterDetail';
+            \\    let activeMasterRowId = null;
+            \\    let activeMasterRow = null;
+            \\    let activeChildTable = '';
+            \\    let masterTableRecords = [];
+            \\    let masterTableColumns = [];
+            \\    let childTableRecords = [];
+            \\    let childTableColumns = [];
+            \\    let joinedTableData = { columns: [], rows: [] };
+            \\    let filteredMasterRows = [];
+            \\    let filteredJoinedRows = [];
+            \\    let generatedModelSql = '';
+            \\    let modelCrudTarget = null; // { mode: 'master'|'child', tableName: string }
+            \\
+            \\    function showModelAlert(type, message) {
+            \\      const el = document.getElementById('modelAlert');
+            \\      if (!el) return;
+            \\      el.className = 'alert-box ' + (type === 'error' ? 'alert-error' : 'alert-success');
+            \\      el.innerText = message;
+            \\      el.style.display = 'block';
+            \\      setTimeout(() => {
+            \\        if (el) el.style.display = 'none';
+            \\      }, 4000);
+            \\    }
+            \\
+            \\    function onAutoGenerateToggle() {
+            \\      const chk = document.getElementById('autoGenerateUiCheck');
+            \\      autoRegenerateUi = chk ? chk.checked : true;
+            \\      if (autoRegenerateUi && currentModel.tables && currentModel.tables.length > 0) {
+            \\        generateAppUiFromModel(false);
+            \\      }
+            \\    }
+            \\
+            \\    function switchModelSubView(mode) {
+            \\      modelSubView = mode;
+            \\      const canvasLayout = document.getElementById('modelCanvasLayout');
+            \\      const appLayout = document.getElementById('modelAppLayout');
+            \\      const btnBuilder = document.getElementById('subviewBtnBuilder');
+            \\      const btnApp = document.getElementById('subviewBtnApp');
+            \\      if (mode === 'builder') {
+            \\        if (canvasLayout) canvasLayout.style.display = 'grid';
+            \\        if (appLayout) appLayout.style.display = 'none';
+            \\        if (btnBuilder) btnBuilder.classList.add('active');
+            \\        if (btnApp) btnApp.classList.remove('active');
+            \\        renderModelCanvas();
+            \\      } else {
+            \\        if (canvasLayout) canvasLayout.style.display = 'none';
+            \\        if (appLayout) appLayout.style.display = 'flex';
+            \\        if (btnBuilder) btnBuilder.classList.remove('active');
+            \\        if (btnApp) btnApp.classList.add('active');
+            \\        generateAppUiFromModel(false);
+            \\      }
+            \\    }
+            \\
+            \\    async function initModelBuilder() {
+            \\      await fetchModelsList();
+            \\      renderModelPalette();
+            \\      renderModelCanvas();
+            \\    }
+            \\
+            \\    async function fetchModelsList() {
+            \\      try {
+            \\        const res = await fetch('/api/models');
+            \\        if (!res.ok) return;
+            \\        savedModelsList = await res.json();
+            \\        const sel = document.getElementById('modelSelector');
+            \\        if (!sel) return;
+            \\        const curVal = currentModel.name || '';
+            \\        let html = '<option value="">&mdash; New Data Model &mdash;</option>';
+            \\        for (const m of savedModelsList) {
+            \\          const isSel = (m.name === curVal) ? ' selected' : '';
+            \\          const count = (m.tables ? m.tables.length : 0);
+            \\          html += '<option value="' + escapeHtml(m.name) + '"' + isSel + '>' + escapeHtml(m.name) + ' (' + count + ' tables)</option>';
+            \\        }
+            \\        sel.innerHTML = html;
+            \\        const delBtn = document.getElementById('modelDeleteBtn');
+            \\        if (delBtn) delBtn.style.display = (curVal ? 'inline-block' : 'none');
+            \\      } catch (err) {
+            \\        console.error('Failed to fetch models:', err);
+            \\      }
+            \\    }
+            \\
+            \\    function onModelSelectChange() {
+            \\      const sel = document.getElementById('modelSelector');
+            \\      const name = sel ? sel.value : '';
+            \\      if (!name) {
+            \\        clearModelCanvas();
+            \\        return;
+            \\      }
+            \\      const found = savedModelsList.find(m => m.name === name);
+            \\      if (found) {
+            \\        currentModel = JSON.parse(JSON.stringify(found));
+            \\        const nameInput = document.getElementById('modelNameInput');
+            \\        if (nameInput) nameInput.value = currentModel.name;
+            \\        const delBtn = document.getElementById('modelDeleteBtn');
+            \\        if (delBtn) delBtn.style.display = 'inline-block';
+            \\        renderModelCanvas();
+            \\        if (autoRegenerateUi && currentModel.tables && currentModel.tables.length > 0) {
+            \\          generateAppUiFromModel(false);
+            \\        }
+            \\      }
+            \\    }
+            \\
+            \\    async function saveCurrentModel() {
+            \\      const nameInput = document.getElementById('modelNameInput');
+            \\      const name = (nameInput ? nameInput.value : '').trim();
+            \\      if (!name) {
+            \\        showModelAlert('error', 'Please enter a name for your data model.');
+            \\        if (nameInput) nameInput.focus();
+            \\        return;
+            \\      }
+            \\      currentModel.name = name;
+            \\      try {
+            \\        const res = await fetch('/api/models/save', {
+            \\          method: 'POST',
+            \\          headers: { 'Content-Type': 'application/json' },
+            \\          body: JSON.stringify(currentModel)
+            \\        });
+            \\        const data = await res.json();
+            \\        if (!res.ok || data.error) {
+            \\          showModelAlert('error', 'Failed to save model: ' + (data.error || 'Server error'));
+            \\          return;
+            \\        }
+            \\        showModelAlert('success', 'Data model "' + name + '" saved successfully!');
+            \\        await fetchModelsList();
+            \\        const delBtn = document.getElementById('modelDeleteBtn');
+            \\        if (delBtn) delBtn.style.display = 'inline-block';
+            \\      } catch (err) {
+            \\        showModelAlert('error', 'Network error saving model: ' + err.message);
+            \\      }
+            \\    }
+            \\
+            \\    async function deleteCurrentModel() {
+            \\      if (!currentModel.name) return;
+            \\      if (!confirm('Are you sure you want to delete data model "' + currentModel.name + '"?')) return;
+            \\      try {
+            \\        const res = await fetch('/api/models/delete', {
+            \\          method: 'POST',
+            \\          headers: { 'Content-Type': 'application/json' },
+            \\          body: JSON.stringify({ name: currentModel.name })
+            \\        });
+            \\        const data = await res.json();
+            \\        if (!res.ok || data.error) {
+            \\          showModelAlert('error', 'Failed to delete model: ' + (data.error || 'Server error'));
+            \\          return;
+            \\        }
+            \\        showModelAlert('success', 'Data model deleted successfully.');
+            \\        clearModelCanvas();
+            \\        await fetchModelsList();
+            \\      } catch (err) {
+            \\        showModelAlert('error', 'Network error deleting model: ' + err.message);
+            \\      }
+            \\    }
+            \\
+            \\    function clearModelCanvas() {
+            \\      currentModel = {
+            \\        name: '',
+            \\        masterTable: '',
+            \\        tables: [],
+            \\        links: []
+            \\      };
+            \\      pendingPort = null;
+            \\      const nameInput = document.getElementById('modelNameInput');
+            \\      if (nameInput) nameInput.value = '';
+            \\      const sel = document.getElementById('modelSelector');
+            \\      if (sel) sel.value = '';
+            \\      const delBtn = document.getElementById('modelDeleteBtn');
+            \\      if (delBtn) delBtn.style.display = 'none';
+            \\      renderModelCanvas();
+            \\    }
+            \\
+            \\    function renderModelPalette() {
+            \\      const container = document.getElementById('modelPaletteList');
+            \\      const countEl = document.getElementById('paletteTableCount');
+            \\      if (!container) return;
+            \\      if (!knownTables || knownTables.length === 0) {
+            \\        container.innerHTML = '<div style="color:#64748b;font-size:12px;padding:8px;">No tables found in database. Create tables first in Studio.</div>';
+            \\        if (countEl) countEl.innerText = '0 Tables';
+            \\        return;
+            \\      }
+            \\      const searchInput = document.getElementById('paletteSearchInput');
+            \\      const filter = (searchInput ? searchInput.value : '').trim().toLowerCase();
+            \\      const filtered = knownTables.filter(t => !filter || t.name.toLowerCase().includes(filter));
+            \\      if (countEl) countEl.innerText = filtered.length + ' Tables';
+            \\
+            \\      let html = '';
+            \\      for (const t of filtered) {
+            \\        const onCanvas = currentModel.tables && currentModel.tables.some(ct => ct.name.toLowerCase() === t.name.toLowerCase());
+            \\        const cols = t.columns || [];
+            \\        html += '<div class="palette-item" draggable="true" ondragstart="onPaletteDragStart(event, \'' + escapeHtml(t.name) + '\')">';
+            \\        html += '  <div style="display:flex;justify-content:space-between;align-items:center;">';
+            \\        html += '    <strong style="color:#f8fafc;font-size:12px;">' + escapeHtml(t.name) + '</strong>';
+            \\        if (onCanvas) {
+            \\          html += '    <span style="font-size:10px;color:#38bdf8;background:rgba(56,189,248,0.15);padding:1px 5px;border-radius:3px;">On Canvas</span>';
+            \\        } else {
+            \\          html += '    <button class="btn-primary btn-xs" onclick="addTableToCanvas(\'' + escapeHtml(t.name) + '\')" title="Add to canvas">+</button>';
+            \\        }
+            \\        html += '  </div>';
+            \\        html += '  <div style="font-size:11px;color:#94a3b8;margin-top:2px;">';
+            \\        html += '    ' + cols.length + ' cols &bull; ' + (t.row_count || 0) + ' rows';
+            \\        html += '  </div>';
+            \\        html += '</div>';
+            \\      }
+            \\      container.innerHTML = html;
+            \\    }
+            \\
+            \\    function onPaletteDragStart(e, tableName) {
+            \\      e.dataTransfer.setData('text/plain', tableName);
+            \\      e.dataTransfer.effectAllowed = 'copy';
+            \\    }
+            \\
+            \\    function onCanvasDragOver(e) {
+            \\      e.preventDefault();
+            \\      e.dataTransfer.dropEffect = 'copy';
+            \\    }
+            \\
+            \\    function onCanvasDrop(e) {
+            \\      e.preventDefault();
+            \\      const tableName = e.dataTransfer.getData('text/plain');
+            \\      if (!tableName) return;
+            \\      const vp = document.getElementById('canvasViewport');
+            \\      const rect = vp.getBoundingClientRect();
+            \\      const x = Math.max(20, Math.round(e.clientX - rect.left + vp.scrollLeft - 100));
+            \\      const y = Math.max(20, Math.round(e.clientY - rect.top + vp.scrollTop - 30));
+            \\      addTableToCanvas(tableName, x, y);
+            \\    }
+            \\
+            \\    function addTableToCanvas(tableName, x, y) {
+            \\      if (!currentModel.tables) currentModel.tables = [];
+            \\      const existing = currentModel.tables.find(t => t.name.toLowerCase() === tableName.toLowerCase());
+            \\      if (existing) {
+            \\        showModelAlert('error', 'Table "' + tableName + '" is already on the canvas.');
+            \\        return;
+            \\      }
+            \\      const schema = knownTables.find(t => t.name.toLowerCase() === tableName.toLowerCase());
+            \\      if (!schema) {
+            \\        showModelAlert('error', 'Table schema for "' + tableName + '" not found.');
+            \\        return;
+            \\      }
+            \\      const posX = (x !== undefined && x !== null) ? x : (40 + (currentModel.tables.length % 4) * 260);
+            \\      const posY = (y !== undefined && y !== null) ? y : (40 + Math.floor(currentModel.tables.length / 4) * 220);
+            \\
+            \\      const tableEntry = {
+            \\        name: schema.name,
+            \\        x: posX,
+            \\        y: posY,
+            \\        columns: (schema.columns || []).map(c => ({
+            \\          name: c.name,
+            \\          type: c.type,
+            \\          primary_key: !!c.primary_key,
+            \\          included: true,
+            \\          alias: ''
+            \\        }))
+            \\      };
+            \\
+            \\      if (!currentModel.masterTable) {
+            \\        currentModel.masterTable = schema.name;
+            \\      }
+            \\      currentModel.tables.push(tableEntry);
+            \\      renderModelPalette();
+            \\      renderModelCanvas();
+            \\      if (autoRegenerateUi) {
+            \\        generateAppUiFromModel(false);
+            \\      }
+            \\    }
+            \\
+            \\    function removeTableFromCanvas(tableName) {
+            \\      if (!currentModel.tables) return;
+            \\      currentModel.tables = currentModel.tables.filter(t => t.name.toLowerCase() !== tableName.toLowerCase());
+            \\      if (currentModel.links) {
+            \\        currentModel.links = currentModel.links.filter(l =>
+            \\          l.fromTable.toLowerCase() !== tableName.toLowerCase() &&
+            \\          l.toTable.toLowerCase() !== tableName.toLowerCase()
+            \\        );
+            \\      }
+            \\      if (currentModel.masterTable && currentModel.masterTable.toLowerCase() === tableName.toLowerCase()) {
+            \\        currentModel.masterTable = currentModel.tables.length > 0 ? currentModel.tables[0].name : '';
+            \\      }
+            \\      renderModelPalette();
+            \\      renderModelCanvas();
+            \\      if (autoRegenerateUi) {
+            \\        generateAppUiFromModel(false);
+            \\      }
+            \\    }
+            \\
+            \\    function setModelMasterTable(tableName) {
+            \\      currentModel.masterTable = tableName;
+            \\      renderModelCanvas();
+            \\      if (autoRegenerateUi) {
+            \\        generateAppUiFromModel(false);
+            \\      }
+            \\    }
+            \\
+            \\    function toggleColumnInclude(tableName, colName, included) {
+            \\      if (!currentModel.tables) return;
+            \\      const tbl = currentModel.tables.find(t => t.name.toLowerCase() === tableName.toLowerCase());
+            \\      if (tbl && tbl.columns) {
+            \\        const col = tbl.columns.find(c => c.name.toLowerCase() === colName.toLowerCase());
+            \\        if (col) {
+            \\          col.included = included;
+            \\          if (autoRegenerateUi) {
+            \\            generateAppUiFromModel(false);
+            \\          }
+            \\        }
+            \\      }
+            \\    }
+            \\
+            \\    function startCardDrag(e, tableName) {
+            \\      if (e.target.closest('button') || e.target.closest('input') || e.target.closest('.port-anchor')) return;
+            \\      const tbl = currentModel.tables.find(t => t.name.toLowerCase() === tableName.toLowerCase());
+            \\      if (!tbl) return;
+            \\      draggingCard = {
+            \\        tableName: tableName,
+            \\        startX: e.clientX,
+            \\        startY: e.clientY,
+            \\        origX: tbl.x,
+            \\        origY: tbl.y
+            \\      };
+            \\      e.preventDefault();
+            \\    }
+            \\
+            \\    function onCanvasMouseMove(e) {
+            \\      if (draggingCard) {
+            \\        const dx = e.clientX - draggingCard.startX;
+            \\        const dy = e.clientY - draggingCard.startY;
+            \\        const tbl = currentModel.tables.find(t => t.name.toLowerCase() === draggingCard.tableName.toLowerCase());
+            \\        if (tbl) {
+            \\          tbl.x = Math.max(10, draggingCard.origX + dx);
+            \\          tbl.y = Math.max(10, draggingCard.origY + dy);
+            \\          const cardEl = document.getElementById('model_card_' + tbl.name);
+            \\          if (cardEl) {
+            \\            cardEl.style.left = tbl.x + 'px';
+            \\            cardEl.style.top = tbl.y + 'px';
+            \\          }
+            \\          renderModelLinks();
+            \\        }
+            \\      } else if (pendingPort) {
+            \\        const tempPath = document.getElementById('tempWirePath');
+            \\        const world = document.getElementById('canvasWorld');
+            \\        if (tempPath && world) {
+            \\          const worldRect = world.getBoundingClientRect();
+            \\          const startEl = document.getElementById('port_' + pendingPort.tableName + '_' + pendingPort.colName);
+            \\          if (startEl) {
+            \\            const startRect = startEl.getBoundingClientRect();
+            \\            const sx = startRect.left + startRect.width / 2 - worldRect.left;
+            \\            const sy = startRect.top + startRect.height / 2 - worldRect.top;
+            \\            const ex = e.clientX - worldRect.left;
+            \\            const ey = e.clientY - worldRect.top;
+            \\            const dx = Math.max(Math.abs(ex - sx) * 0.5, 40);
+            \\            tempPath.setAttribute('d', 'M ' + sx + ' ' + sy + ' C ' + (sx + dx) + ' ' + sy + ', ' + (ex - dx) + ' ' + ey + ', ' + ex + ' ' + ey);
+            \\            tempPath.style.display = 'block';
+            \\          }
+            \\        }
+            \\      }
+            \\    }
+            \\
+            \\    function onCanvasClick(e) {
+            \\      if (pendingPort && !e.target.closest('.port-anchor')) {
+            \\        pendingPort = null;
+            \\        const tempPath = document.getElementById('tempWirePath');
+            \\        if (tempPath) tempPath.style.display = 'none';
+            \\        renderModelCanvas();
+            \\      }
+            \\    }
+            \\
+            \\    function handlePortClick(e, tableName, colName, isPk) {
+            \\      e.stopPropagation();
+            \\      if (!pendingPort) {
+            \\        pendingPort = { tableName: tableName, colName: colName, isPk: isPk };
+            \\        renderModelCanvas();
+            \\        showModelAlert('success', 'Selected ' + tableName + '.' + colName + '. Click matching column port on another table to link.');
+            \\        return;
+            \\      }
+            \\
+            \\      if (pendingPort.tableName.toLowerCase() === tableName.toLowerCase()) {
+            \\        if (pendingPort.colName.toLowerCase() === colName.toLowerCase()) {
+            \\          pendingPort = null;
+            \\          renderModelCanvas();
+            \\          return;
+            \\        }
+            \\        showModelAlert('error', 'Cannot link a table to itself.');
+            \\        pendingPort = null;
+            \\        renderModelCanvas();
+            \\        return;
+            \\      }
+            \\
+            \\      if (!currentModel.links) currentModel.links = [];
+            \\      const exists = currentModel.links.some(l =>
+            \\        (l.fromTable.toLowerCase() === pendingPort.tableName.toLowerCase() && l.fromCol.toLowerCase() === pendingPort.colName.toLowerCase() &&
+            \\         l.toTable.toLowerCase() === tableName.toLowerCase() && l.toCol.toLowerCase() === colName.toLowerCase()) ||
+            \\        (l.fromTable.toLowerCase() === tableName.toLowerCase() && l.fromCol.toLowerCase() === colName.toLowerCase() &&
+            \\         l.toTable.toLowerCase() === pendingPort.tableName.toLowerCase() && l.toCol.toLowerCase() === pendingPort.colName.toLowerCase())
+            \\      );
+            \\
+            \\      if (exists) {
+            \\        showModelAlert('error', 'This relationship already exists.');
+            \\        pendingPort = null;
+            \\        renderModelCanvas();
+            \\        return;
+            \\      }
+            \\
+            \\      let fromT = pendingPort.tableName;
+            \\      let fromC = pendingPort.colName;
+            \\      let toT = tableName;
+            \\      let toC = colName;
+            \\
+            \\      if (!pendingPort.isPk && isPk) {
+            \\        fromT = tableName;
+            \\        fromC = colName;
+            \\        toT = pendingPort.tableName;
+            \\        toC = pendingPort.colName;
+            \\      }
+            \\
+            \\      currentModel.links.push({
+            \\        fromTable: fromT,
+            \\        fromCol: fromC,
+            \\        toTable: toT,
+            \\        toCol: toC,
+            \\        cardinality: '1:N'
+            \\      });
+            \\
+            \\      pendingPort = null;
+            \\      renderModelCanvas();
+            \\      showModelAlert('success', 'Linked ' + fromT + '.' + fromC + ' \u2794 ' + toT + '.' + toC);
+            \\      if (autoRegenerateUi) {
+            \\        generateAppUiFromModel(false);
+            \\      }
+            \\    }
+            \\
+            \\    function deleteModelLink(idx) {
+            \\      if (!currentModel.links) return;
+            \\      if (idx >= 0 && idx < currentModel.links.length) {
+            \\        const removed = currentModel.links.splice(idx, 1)[0];
+            \\        renderModelCanvas();
+            \\        showModelAlert('success', 'Removed relationship ' + removed.fromTable + ' \u2794 ' + removed.toTable);
+            \\        if (autoRegenerateUi) {
+            \\          generateAppUiFromModel(false);
+            \\        }
+            \\      }
+            \\    }
+            \\
+            \\    function autoDetectModelLinks() {
+            \\      if (!currentModel.tables || currentModel.tables.length < 2) {
+            \\        showModelAlert('error', 'Add at least 2 tables to the canvas to detect relationships.');
+            \\        return;
+            \\      }
+            \\      if (!currentModel.links) currentModel.links = [];
+            \\      let detectedCount = 0;
+            \\      for (const parent of currentModel.tables) {
+            \\        const pkCol = parent.columns ? parent.columns.find(c => c.primary_key) : null;
+            \\        if (!pkCol) continue;
+            \\        const parentNameLower = parent.name.toLowerCase();
+            \\        for (const child of currentModel.tables) {
+            \\          if (child.name.toLowerCase() === parentNameLower || !child.columns) continue;
+            \\          for (const col of child.columns) {
+            \\            const cName = col.name.toLowerCase();
+            \\            const matchesExact = cName === parentNameLower + '_' + pkCol.name.toLowerCase();
+            \\            const matchesSingular = parentNameLower.endsWith('s') &&
+            \\              cName === parentNameLower.slice(0, -1) + '_' + pkCol.name.toLowerCase();
+            \\            const matchesId = cName === parentNameLower + '_id';
+            \\
+            \\            if (matchesExact || matchesSingular || matchesId) {
+            \\              const already = currentModel.links.some(l =>
+            \\                (l.fromTable.toLowerCase() === parent.name.toLowerCase() && l.toTable.toLowerCase() === child.name.toLowerCase() && l.toCol.toLowerCase() === col.name.toLowerCase()) ||
+            \\                (l.fromTable.toLowerCase() === child.name.toLowerCase() && l.toTable.toLowerCase() === parent.name.toLowerCase())
+            \\              );
+            \\              if (!already) {
+            \\                currentModel.links.push({
+            \\                  fromTable: parent.name,
+            \\                  fromCol: pkCol.name,
+            \\                  toTable: child.name,
+            \\                  toCol: col.name,
+            \\                  cardinality: '1:N'
+            \\                });
+            \\                detectedCount++;
+            \\              }
+            \\            }
+            \\          }
+            \\        }
+            \\      }
+            \\      renderModelCanvas();
+            \\      if (detectedCount > 0) {
+            \\        showModelAlert('success', 'Auto-detected ' + detectedCount + ' relationship(s) across tables!');
+            \\        if (autoRegenerateUi) {
+            \\          generateAppUiFromModel(false);
+            \\        }
+            \\      } else {
+            \\        showModelAlert('success', 'No additional matching foreign keys detected.');
+            \\      }
+            \\    }
+            \\
+            \\    function renderModelCanvas() {
+            \\      const container = document.getElementById('canvasCardsContainer');
+            \\      const tempPath = document.getElementById('tempWirePath');
+            \\      if (tempPath) tempPath.style.display = 'none';
+            \\      if (!container) return;
+            \\
+            \\      if (!currentModel.tables) currentModel.tables = [];
+            \\      if (!currentModel.links) currentModel.links = [];
+            \\
+            \\      const summary = document.getElementById('canvasSummaryText');
+            \\      if (summary) {
+            \\        summary.innerHTML = '<strong>' + currentModel.tables.length + '</strong> Tables &bull; <strong>' + currentModel.links.length + '</strong> Relationships';
+            \\      }
+            \\
+            \\      let cardsHtml = '';
+            \\      for (const tbl of currentModel.tables) {
+            \\        const isMaster = currentModel.masterTable && currentModel.masterTable.toLowerCase() === tbl.name.toLowerCase();
+            \\        cardsHtml += '<div id="model_card_' + escapeHtml(tbl.name) + '" class="model-card" style="left:' + tbl.x + 'px; top:' + tbl.y + 'px;">';
+            \\        cardsHtml += '  <div class="model-card-header" onmousedown="startCardDrag(event, \'' + escapeHtml(tbl.name) + '\')">';
+            \\        cardsHtml += '    <div style="display:flex;align-items:center;gap:6px;overflow:hidden;">';
+            \\        cardsHtml += '      <strong style="color:#f8fafc;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(tbl.name) + '</strong>';
+            \\        if (isMaster) {
+            \\          cardsHtml += '      <span style="font-size:9px;background:#38bdf8;color:#0f172a;font-weight:700;padding:1px 5px;border-radius:3px;">MASTER</span>';
+            \\        }
+            \\        cardsHtml += '    </div>';
+            \\        cardsHtml += '    <div style="display:flex;align-items:center;gap:4px;">';
+            \\        if (!isMaster) {
+            \\          cardsHtml += '      <button class="btn-secondary btn-xs" style="padding:1px 5px;font-size:10px;" onclick="setModelMasterTable(\'' + escapeHtml(tbl.name) + '\')" title="Set as Root/Master Entity">\u2605 Set Master</button>';
+            \\        }
+            \\        cardsHtml += '      <button class="btn-danger btn-xs" style="padding:1px 5px;font-size:10px;" onclick="removeTableFromCanvas(\'' + escapeHtml(tbl.name) + '\')" title="Remove from Canvas">&times;</button>';
+            \\        cardsHtml += '    </div>';
+            \\        cardsHtml += '  </div>';
+            \\
+            \\        cardsHtml += '  <div class="model-card-columns">';
+            \\        for (const col of (tbl.columns || [])) {
+            \\          const isPending = pendingPort && pendingPort.tableName.toLowerCase() === tbl.name.toLowerCase() && pendingPort.colName.toLowerCase() === col.name.toLowerCase();
+            \\          const portClass = 'port-anchor' + (isPending ? ' port-selected' : '');
+            \\          cardsHtml += '    <div class="model-card-column-row">';
+            \\          cardsHtml += '      <div style="display:flex;align-items:center;gap:6px;">';
+            \\          cardsHtml += '        <input type="checkbox" ' + (col.included !== false ? 'checked' : '') + ' onchange="toggleColumnInclude(\'' + escapeHtml(tbl.name) + '\', \'' + escapeHtml(col.name) + '\', this.checked)" title="Include in generated views" />';
+            \\          cardsHtml += '        <span style="font-family:monospace;font-size:11px;color:' + (col.primary_key ? '#f59e0b' : '#cbd5e1') + ';">';
+            \\          if (col.primary_key) cardsHtml += '🔑 ';
+            \\          cardsHtml += escapeHtml(col.name);
+            \\          cardsHtml += '        </span>';
+            \\          cardsHtml += '      </div>';
+            \\          cardsHtml += '      <div style="display:flex;align-items:center;gap:6px;">';
+            \\          cardsHtml += '        <span class="badge-type" style="font-size:9px;padding:1px 4px;">' + escapeHtml(col.type) + '</span>';
+            \\          cardsHtml += '        <span id="port_' + escapeHtml(tbl.name) + '_' + escapeHtml(col.name) + '" class="' + portClass + '" onclick="handlePortClick(event, \'' + escapeHtml(tbl.name) + '\', \'' + escapeHtml(col.name) + '\', ' + (col.primary_key ? 'true' : 'false') + ')" title="Connect relationship port"></span>';
+            \\          cardsHtml += '      </div>';
+            \\          cardsHtml += '    </div>';
+            \\        }
+            \\        cardsHtml += '  </div>';
+            \\        cardsHtml += '</div>';
+            \\      }
+            \\      container.innerHTML = cardsHtml;
+            \\
+            \\      const linksList = document.getElementById('canvasLinksList');
+            \\      if (linksList) {
+            \\        if (!currentModel.links || currentModel.links.length === 0) {
+            \\          linksList.innerHTML = '<em style="color:#64748b;font-size:11px;">No relationships yet. Connect table ports to link tables.</em>';
+            \\        } else {
+            \\          let lHtml = '';
+            \\          currentModel.links.forEach((l, idx) => {
+            \\            lHtml += '<span style="background:#1e293b;border:1px solid #334155;border-radius:4px;padding:2px 8px;font-size:11px;color:#e2e8f0;display:inline-flex;align-items:center;gap:5px;">';
+            \\            lHtml += '  <strong>' + escapeHtml(l.fromTable) + '.' + escapeHtml(l.fromCol) + '</strong> &rarr; <strong>' + escapeHtml(l.toTable) + '.' + escapeHtml(l.toCol) + '</strong>';
+            \\            lHtml += '  <button style="background:none;border:none;color:#ef4444;cursor:pointer;font-weight:bold;padding:0 2px;" onclick="deleteModelLink(' + idx + ')" title="Remove">&times;</button>';
+            \\            lHtml += '</span>';
+            \\          });
+            \\          linksList.innerHTML = lHtml;
+            \\        }
+            \\      }
+            \\
+            \\      setTimeout(renderModelLinks, 10);
+            \\    }
+            \\
+            \\    function renderModelLinks() {
+            \\      const svgLinks = document.getElementById('svgLinksGroup');
+            \\      const svgBadges = document.getElementById('svgBadgesGroup');
+            \\      const world = document.getElementById('canvasWorld');
+            \\      if (!svgLinks || !svgBadges || !world) return;
+            \\
+            \\      svgLinks.innerHTML = '';
+            \\      svgBadges.innerHTML = '';
+            \\      const worldRect = world.getBoundingClientRect();
+            \\
+            \\      (currentModel.links || []).forEach((link, idx) => {
+            \\        const p1 = document.getElementById('port_' + link.fromTable + '_' + link.fromCol);
+            \\        const p2 = document.getElementById('port_' + link.toTable + '_' + link.toCol);
+            \\        if (!p1 || !p2) return;
+            \\
+            \\        const r1 = p1.getBoundingClientRect();
+            \\        const r2 = p2.getBoundingClientRect();
+            \\        const x1 = r1.left + r1.width / 2 - worldRect.left;
+            \\        const y1 = r1.top + r1.height / 2 - worldRect.top;
+            \\        const x2 = r2.left + r2.width / 2 - worldRect.left;
+            \\        const y2 = r2.top + r2.height / 2 - worldRect.top;
+            \\
+            \\        const dx = Math.max(Math.abs(x2 - x1) * 0.5, 40);
+            \\        const d = 'M ' + x1 + ' ' + y1 + ' C ' + (x1 + dx) + ' ' + y1 + ', ' + (x2 - dx) + ' ' + y2 + ', ' + x2 + ' ' + y2;
+            \\
+            \\        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            \\        path.setAttribute('d', d);
+            \\        path.setAttribute('class', 'link-path');
+            \\        path.setAttribute('marker-end', 'url(#arrow)');
+            \\        svgLinks.appendChild(path);
+            \\
+            \\        const mx = (x1 + x2) / 2;
+            \\        const my = (y1 + y2) / 2;
+            \\        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            \\        g.setAttribute('class', 'link-badge');
+            \\        g.setAttribute('onclick', 'deleteModelLink(' + idx + ')');
+            \\        g.setAttribute('cursor', 'pointer');
+            \\
+            \\        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            \\        rect.setAttribute('x', mx - 28);
+            \\        rect.setAttribute('y', my - 10);
+            \\        rect.setAttribute('width', 56);
+            \\        rect.setAttribute('height', 20);
+            \\        rect.setAttribute('rx', 10);
+            \\        rect.setAttribute('fill', '#0f172a');
+            \\        rect.setAttribute('stroke', '#38bdf8');
+            \\        rect.setAttribute('stroke-width', '1');
+            \\
+            \\        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            \\        text.setAttribute('x', mx);
+            \\        text.setAttribute('y', my + 4);
+            \\        text.setAttribute('text-anchor', 'middle');
+            \\        text.setAttribute('fill', '#38bdf8');
+            \\        text.setAttribute('font-size', '10');
+            \\        text.setAttribute('font-family', 'system-ui, sans-serif');
+            \\        text.textContent = '1:N \u2715';
+            \\
+            \\        g.appendChild(rect);
+            \\        g.appendChild(text);
+            \\        svgBadges.appendChild(g);
+            \\      });
+            \\    }
+            \\
+            \\    // ==========================================
+            \\    // AUTOMATED APP UI GENERATION LOGIC
+            \\    // ==========================================
+            \\    function buildModelSqlStatement() {
+            \\      if (!currentModel.tables || currentModel.tables.length === 0) return '';
+            \\      const masterT = currentModel.masterTable || currentModel.tables[0].name;
+            \\      let selectCols = [];
+            \\      for (const tbl of currentModel.tables) {
+            \\        for (const col of (tbl.columns || [])) {
+            \\          if (col.included !== false) {
+            \\            const alias = col.alias || (tbl.name + '_' + col.name);
+            \\            selectCols.push(tbl.name + '.' + col.name + ' AS ' + alias);
+            \\          }
+            \\        }
+            \\      }
+            \\      if (selectCols.length === 0) {
+            \\        selectCols.push(masterT + '.*');
+            \\      }
+            \\
+            \\      let sql = 'SELECT\n  ' + selectCols.join(',\n  ') + '\nFROM ' + masterT;
+            \\
+            \\      const joinedTables = new Set([masterT.toLowerCase()]);
+            \\      let remainingLinks = [...(currentModel.links || [])];
+            \\      let progress = true;
+            \\
+            \\      while (remainingLinks.length > 0 && progress) {
+            \\        progress = false;
+            \\        for (let i = 0; i < remainingLinks.length; i++) {
+            \\          const link = remainingLinks[i];
+            \\          const fromLower = link.fromTable.toLowerCase();
+            \\          const toLower = link.toTable.toLowerCase();
+            \\          if (joinedTables.has(fromLower) && !joinedTables.has(toLower)) {
+            \\            sql += '\nLEFT JOIN ' + link.toTable + ' ON ' + link.toTable + '.' + link.toCol + ' = ' + link.fromTable + '.' + link.fromCol;
+            \\            joinedTables.add(toLower);
+            \\            remainingLinks.splice(i, 1);
+            \\            progress = true;
+            \\            break;
+            \\          } else if (joinedTables.has(toLower) && !joinedTables.has(fromLower)) {
+            \\            sql += '\nLEFT JOIN ' + link.fromTable + ' ON ' + link.fromTable + '.' + link.fromCol + ' = ' + link.toTable + '.' + link.toCol;
+            \\            joinedTables.add(fromLower);
+            \\            remainingLinks.splice(i, 1);
+            \\            progress = true;
+            \\            break;
+            \\          }
+            \\        }
+            \\      }
+            \\      sql += '\nLIMIT 200;';
+            \\      return sql;
+            \\    }
+            \\
+            \\    async function generateAppUiFromModel(autoSwitch) {
+            \\      if (!currentModel.tables || currentModel.tables.length === 0) {
+            \\        if (autoSwitch) {
+            \\          showModelAlert('error', 'Add at least one table to the canvas to generate an App UI.');
+            \\        }
+            \\        return;
+            \\      }
+            \\
+            \\      if (!currentModel.masterTable || !currentModel.tables.some(t => t.name.toLowerCase() === currentModel.masterTable.toLowerCase())) {
+            \\        currentModel.masterTable = currentModel.tables[0].name;
+            \\      }
+            \\
+            \\      const appTitle = document.getElementById('generatedAppTitle');
+            \\      const appSubtitle = document.getElementById('generatedAppSubtitle');
+            \\      if (appTitle) {
+            \\        appTitle.innerText = 'Application: ' + (currentModel.name || 'Untitled Data Model');
+            \\      }
+            \\      if (appSubtitle) {
+            \\        appSubtitle.innerHTML = currentModel.tables.length + ' Entities &bull; ' + (currentModel.links ? currentModel.links.length : 0) + ' Relationships &bull; Root: <strong>' + escapeHtml(currentModel.masterTable) + '</strong>';
+            \\      }
+            \\
+            \\      const masterSel = document.getElementById('appMasterTableSelect');
+            \\      if (masterSel) {
+            \\        let optHtml = '';
+            \\        for (const tbl of currentModel.tables) {
+            \\          const isSel = (tbl.name.toLowerCase() === currentModel.masterTable.toLowerCase()) ? ' selected' : '';
+            \\          optHtml += '<option value="' + escapeHtml(tbl.name) + '"' + isSel + '>' + escapeHtml(tbl.name) + '</option>';
+            \\        }
+            \\        masterSel.innerHTML = optHtml;
+            \\      }
+            \\
+            \\      await loadMasterTableData();
+            \\
+            \\      generatedModelSql = buildModelSqlStatement();
+            \\      loadJoinedTableData();
+            \\
+            \\      if (autoSwitch) {
+            \\        switchModelSubView('app');
+            \\      }
+            \\    }
+            \\
+            \\    function changeAppMasterTable(tableName) {
+            \\      currentModel.masterTable = tableName;
+            \\      renderModelCanvas();
+            \\      generateAppUiFromModel(false);
+            \\    }
+            \\
+            \\    function switchAppViewTab(tab) {
+            \\      currentAppMode = tab;
+            \\      const mdPanel = document.getElementById('appMasterDetailPanel');
+            \\      const jgPanel = document.getElementById('appJoinedGridPanel');
+            \\      const tabMd = document.getElementById('appTabBtnMasterDetail');
+            \\      const tabJg = document.getElementById('appTabBtnJoinedGrid');
+            \\      if (tab === 'masterDetail') {
+            \\        if (mdPanel) mdPanel.style.display = 'flex';
+            \\        if (jgPanel) jgPanel.style.display = 'none';
+            \\        if (tabMd) tabMd.classList.add('active');
+            \\        if (tabJg) tabJg.classList.remove('active');
+            \\      } else {
+            \\        if (mdPanel) mdPanel.style.display = 'none';
+            \\        if (jgPanel) jgPanel.style.display = 'block';
+            \\        if (tabMd) tabMd.classList.remove('active');
+            \\        if (tabJg) tabJg.classList.add('active');
+            \\      }
+            \\    }
+            \\
+            \\    async function loadMasterTableData() {
+            \\      const masterT = currentModel.masterTable;
+            \\      if (!masterT) return;
+            \\
+            \\      const heading = document.getElementById('masterTableHeading');
+            \\      if (heading) heading.innerText = 'Master Table: ' + masterT;
+            \\
+            \\      const childTabs = document.getElementById('childTabsContainer');
+            \\      const childTables = [];
+            \\      if (currentModel.links) {
+            \\        for (const l of currentModel.links) {
+            \\          if (l.fromTable.toLowerCase() === masterT.toLowerCase() && !childTables.includes(l.toTable)) {
+            \\            childTables.push(l.toTable);
+            \\          } else if (l.toTable.toLowerCase() === masterT.toLowerCase() && !childTables.includes(l.fromTable)) {
+            \\            childTables.push(l.fromTable);
+            \\          }
+            \\        }
+            \\      }
+            \\
+            \\      if (childTabs) {
+            \\        if (childTables.length === 0) {
+            \\          childTabs.innerHTML = '<span style="color:#64748b;font-size:11px;">No linked child entities</span>';
+            \\          activeChildTable = '';
+            \\        } else {
+            \\          let tHtml = '';
+            \\          if (!activeChildTable || !childTables.some(ct => ct.toLowerCase() === activeChildTable.toLowerCase())) {
+            \\            activeChildTable = childTables[0];
+            \\          }
+            \\          for (const ct of childTables) {
+            \\            const isAct = (ct.toLowerCase() === activeChildTable.toLowerCase()) ? ' active' : '';
+            \\            tHtml += '<button class="child-tab-btn' + isAct + '" onclick="selectChildTab(\'' + escapeHtml(ct) + '\')">' + escapeHtml(ct) + '</button>';
+            \\          }
+            \\          childTabs.innerHTML = tHtml;
+            \\        }
+            \\      }
+            \\
+            \\      try {
+            \\        const querySql = 'SELECT * FROM ' + masterT + ' LIMIT 100;';
+            \\        const res = await fetch('/api/query', {
+            \\          method: 'POST',
+            \\          headers: { 'Content-Type': 'application/json' },
+            \\          body: JSON.stringify({ query: querySql })
+            \\        });
+            \\        const data = await res.json();
+            \\        if (data.error) {
+            \\          console.error('Failed to query master table:', data.error);
+            \\          return;
+            \\        }
+            \\
+            \\        masterTableColumns = data.columns || [];
+            \\        masterTableRecords = data.rows || [];
+            \\        filteredMasterRows = [...masterTableRecords];
+            \\        renderMasterTableRows();
+            \\
+            \\        const meta = document.getElementById('masterTableMeta');
+            \\        if (meta) {
+            \\          meta.innerText = masterTableRecords.length + ' records loaded &bull; Click a row to filter linked child details';
+            \\        }
+            \\
+            \\        if (masterTableRecords.length > 0) {
+            \\          selectMasterRow(0);
+            \\        } else {
+            \\          activeMasterRow = null;
+            \\          activeMasterRowId = null;
+            \\          renderChildTableEmpty('No records in master table "' + masterT + '". Add a new record above.');
+            \\        }
+            \\      } catch (err) {
+            \\        console.error('Error querying master table:', err);
+            \\      }
+            \\    }
+            \\
+            \\    function renderMasterTableRows() {
+            \\      const thead = document.getElementById('masterThead');
+            \\      const tbody = document.getElementById('masterTbody');
+            \\      if (!thead || !tbody) return;
+            \\
+            \\      let thHtml = '<tr><th style="width: 36px; text-align: center;">#</th>';
+            \\      for (const col of masterTableColumns) {
+            \\        thHtml += '<th>' + escapeHtml(col) + '</th>';
+            \\      }
+            \\      thHtml += '</tr>';
+            \\      thead.innerHTML = thHtml;
+            \\
+            \\      if (filteredMasterRows.length === 0) {
+            \\        tbody.innerHTML = '<tr><td colspan="' + (masterTableColumns.length + 1) + '" style="text-align:center;color:#64748b;padding:16px;">No matching rows found</td></tr>';
+            \\        return;
+            \\      }
+            \\
+            \\      let tbHtml = '';
+            \\      filteredMasterRows.forEach((row, idx) => {
+            \\        const isSel = (activeMasterRow && row === activeMasterRow) ? ' class="selected-row"' : '';
+            \\        tbHtml += '<tr' + isSel + ' onclick="selectMasterRow(' + idx + ')" style="cursor: pointer;">';
+            \\        tbHtml += '  <td style="text-align: center; color: #64748b; font-size: 11px;">' + (idx + 1) + '</td>';
+            \\        for (const val of row) {
+            \\          const disp = (val === null || val === undefined) ? '<em style="color:#64748b;">NULL</em>' : escapeHtml(String(val));
+            \\          tbHtml += '<td style="font-size:12px;">' + disp + '</td>';
+            \\        }
+            \\        tbHtml += '</tr>';
+            \\      });
+            \\      tbody.innerHTML = tbHtml;
+            \\    }
+            \\
+            \\    function selectMasterRow(filteredIdx) {
+            \\      if (filteredIdx < 0 || filteredIdx >= filteredMasterRows.length) return;
+            \\      activeMasterRow = filteredMasterRows[filteredIdx];
+            \\
+            \\      const masterT = currentModel.masterTable;
+            \\      const tblSchema = knownTables.find(t => t.name.toLowerCase() === masterT.toLowerCase());
+            \\      let pkColName = 'id';
+            \\      if (tblSchema && tblSchema.columns) {
+            \\        const pk = tblSchema.columns.find(c => c.primary_key);
+            \\        if (pk) pkColName = pk.name;
+            \\      }
+            \\      const pkIdx = masterTableColumns.findIndex(c => c.toLowerCase() === pkColName.toLowerCase());
+            \\      activeMasterRowId = (pkIdx >= 0) ? activeMasterRow[pkIdx] : activeMasterRow[0];
+            \\
+            \\      renderMasterTableRows();
+            \\
+            \\      if (activeChildTable) {
+            \\        loadChildTableData(activeChildTable);
+            \\      }
+            \\    }
+            \\
+            \\    function filterMasterRows() {
+            \\      const searchEl = document.getElementById('masterSearchInput');
+            \\      const q = (searchEl ? searchEl.value : '').trim().toLowerCase();
+            \\      if (!q) {
+            \\        filteredMasterRows = [...masterTableRecords];
+            \\      } else {
+            \\        filteredMasterRows = masterTableRecords.filter(row =>
+            \\          row.some(val => val !== null && val !== undefined && String(val).toLowerCase().includes(q))
+            \\        );
+            \\      }
+            \\      renderMasterTableRows();
+            \\    }
+            \\
+            \\    function selectChildTab(childTableName) {
+            \\      activeChildTable = childTableName;
+            \\      const childTabs = document.getElementById('childTabsContainer');
+            \\      if (childTabs) {
+            \\        const btns = childTabs.querySelectorAll('.child-tab-btn');
+            \\        btns.forEach(btn => {
+            \\          btn.classList.toggle('active', btn.innerText.toLowerCase() === childTableName.toLowerCase());
+            \\        });
+            \\      }
+            \\      loadChildTableData(childTableName);
+            \\    }
+            \\
+            \\    async function loadChildTableData(childTableName) {
+            \\      const masterT = currentModel.masterTable;
+            \\      if (!masterT || !childTableName) {
+            \\        renderChildTableEmpty('Select a child tab to view details');
+            \\        return;
+            \\      }
+            \\
+            \\      let link = (currentModel.links || []).find(l =>
+            \\        (l.fromTable.toLowerCase() === masterT.toLowerCase() && l.toTable.toLowerCase() === childTableName.toLowerCase()) ||
+            \\        (l.toTable.toLowerCase() === masterT.toLowerCase() && l.fromTable.toLowerCase() === childTableName.toLowerCase())
+            \\      );
+            \\
+            \\      let childFkCol = '';
+            \\      if (link) {
+            \\        if (link.fromTable.toLowerCase() === masterT.toLowerCase()) {
+            \\          childFkCol = link.toCol;
+            \\        } else {
+            \\          childFkCol = link.fromCol;
+            \\        }
+            \\      } else {
+            \\        childFkCol = masterT.toLowerCase() + '_id';
+            \\      }
+            \\
+            \\      const badge = document.getElementById('childRelationBadge');
+            \\      if (badge) {
+            \\        badge.innerText = childTableName + '.' + childFkCol + ' = ' + (activeMasterRowId !== null ? activeMasterRowId : '?');
+            \\      }
+            \\
+            \\      if (activeMasterRowId === null || activeMasterRowId === undefined) {
+            \\        renderChildTableEmpty('Select a row in the Master table above to view linked ' + childTableName + ' records.');
+            \\        return;
+            \\      }
+            \\
+            \\      try {
+            \\        let quotedVal = (typeof activeMasterRowId === 'number') ? activeMasterRowId : ("'" + String(activeMasterRowId).replace(/'/g, "''") + "'");
+            \\        const querySql = 'SELECT * FROM ' + childTableName + ' WHERE ' + childFkCol + ' = ' + quotedVal + ' LIMIT 100;';
+            \\        const res = await fetch('/api/query', {
+            \\          method: 'POST',
+            \\          headers: { 'Content-Type': 'application/json' },
+            \\          body: JSON.stringify({ query: querySql })
+            \\        });
+            \\        const data = await res.json();
+            \\        if (data.error) {
+            \\          console.error('Failed to query child table:', data.error);
+            \\          renderChildTableEmpty('Error loading linked records: ' + data.error);
+            \\          return;
+            \\        }
+            \\
+            \\        childTableColumns = data.columns || [];
+            \\        childTableRecords = data.rows || [];
+            \\        renderChildTableRows();
+            \\
+            \\        if (badge) {
+            \\          badge.innerText = childTableName + '.' + childFkCol + ' = ' + activeMasterRowId + ' (' + childTableRecords.length + ' records)';
+            \\        }
+            \\      } catch (err) {
+            \\        console.error('Error querying child table:', err);
+            \\        renderChildTableEmpty('Network error loading child records: ' + err.message);
+            \\      }
+            \\    }
+            \\
+            \\    function renderChildTableRows() {
+            \\      const thead = document.getElementById('childThead');
+            \\      const tbody = document.getElementById('childTbody');
+            \\      if (!thead || !tbody) return;
+            \\
+            \\      let thHtml = '<tr><th style="width: 36px; text-align: center;">#</th>';
+            \\      for (const col of childTableColumns) {
+            \\        thHtml += '<th>' + escapeHtml(col) + '</th>';
+            \\      }
+            \\      thHtml += '</tr>';
+            \\      thead.innerHTML = thHtml;
+            \\
+            \\      if (childTableRecords.length === 0) {
+            \\        tbody.innerHTML = '<tr><td colspan="' + (childTableColumns.length + 1) + '" style="text-align:center;color:#64748b;padding:16px;">No linked records found for this master record. Click "+ Add Linked Record" to create one.</td></tr>';
+            \\        return;
+            \\      }
+            \\
+            \\      let tbHtml = '';
+            \\      childTableRecords.forEach((row, idx) => {
+            \\        tbHtml += '<tr>';
+            \\        tbHtml += '  <td style="text-align: center; color: #64748b; font-size: 11px;">' + (idx + 1) + '</td>';
+            \\        for (const val of row) {
+            \\          const disp = (val === null || val === undefined) ? '<em style="color:#64748b;">NULL</em>' : escapeHtml(String(val));
+            \\          tbHtml += '<td style="font-size:12px;">' + disp + '</td>';
+            \\        }
+            \\        tbHtml += '</tr>';
+            \\      });
+            \\      tbody.innerHTML = tbHtml;
+            \\    }
+            \\
+            \\    function renderChildTableEmpty(msg) {
+            \\      const thead = document.getElementById('childThead');
+            \\      const tbody = document.getElementById('childTbody');
+            \\      if (thead) thead.innerHTML = '';
+            \\      if (tbody) tbody.innerHTML = '<tr><td style="text-align:center;color:#64748b;padding:24px;">' + escapeHtml(msg) + '</td></tr>';
+            \\    }
+            \\
+            \\    async function loadJoinedTableData() {
+            \\      const query = generatedModelSql || buildModelSqlStatement();
+            \\      if (!query) return;
+            \\      try {
+            \\        const res = await fetch('/api/query', {
+            \\          method: 'POST',
+            \\          headers: { 'Content-Type': 'application/json' },
+            \\          body: JSON.stringify({ query: query })
+            \\        });
+            \\        const data = await res.json();
+            \\        if (data.error) {
+            \\          console.error('Error executing joined model query:', data.error);
+            \\          return;
+            \\        }
+            \\        joinedTableData = {
+            \\          columns: data.columns || [],
+            \\          rows: data.rows || []
+            \\        };
+            \\        filteredJoinedRows = [...joinedTableData.rows];
+            \\        renderJoinedGridRows();
+            \\
+            \\        const meta = document.getElementById('joinedGridMeta');
+            \\        if (meta) {
+            \\          meta.innerText = joinedTableData.rows.length + ' denormalized rows synthesized across all joined entities';
+            \\        }
+            \\      } catch (err) {
+            \\        console.error('Error fetching joined model data:', err);
+            \\      }
+            \\    }
+            \\
+            \\    function renderJoinedGridRows() {
+            \\      const thead = document.getElementById('joinedThead');
+            \\      const tbody = document.getElementById('joinedTbody');
+            \\      if (!thead || !tbody) return;
+            \\
+            \\      let thHtml = '<tr><th style="width: 36px; text-align: center;">#</th>';
+            \\      for (const col of joinedTableData.columns) {
+            \\        thHtml += '<th>' + escapeHtml(col) + '</th>';
+            \\      }
+            \\      thHtml += '</tr>';
+            \\      thead.innerHTML = thHtml;
+            \\
+            \\      if (filteredJoinedRows.length === 0) {
+            \\        tbody.innerHTML = '<tr><td colspan="' + (joinedTableData.columns.length + 1) + '" style="text-align:center;color:#64748b;padding:20px;">No rows found</td></tr>';
+            \\        return;
+            \\      }
+            \\
+            \\      let tbHtml = '';
+            \\      filteredJoinedRows.forEach((row, idx) => {
+            \\        tbHtml += '<tr>';
+            \\        tbHtml += '  <td style="text-align: center; color: #64748b; font-size: 11px;">' + (idx + 1) + '</td>';
+            \\        for (const val of row) {
+            \\          const disp = (val === null || val === undefined) ? '<em style="color:#64748b;">NULL</em>' : escapeHtml(String(val));
+            \\          tbHtml += '<td style="font-size:12px;">' + disp + '</td>';
+            \\        }
+            \\        tbHtml += '</tr>';
+            \\      });
+            \\      tbody.innerHTML = tbHtml;
+            \\    }
+            \\
+            \\    function filterJoinedRows() {
+            \\      const searchEl = document.getElementById('joinedSearchInput');
+            \\      const q = (searchEl ? searchEl.value : '').trim().toLowerCase();
+            \\      if (!q) {
+            \\        filteredJoinedRows = [...joinedTableData.rows];
+            \\      } else {
+            \\        filteredJoinedRows = joinedTableData.rows.filter(row =>
+            \\          row.some(val => val !== null && val !== undefined && String(val).toLowerCase().includes(q))
+            \\        );
+            \\      }
+            \\      renderJoinedGridRows();
+            \\    }
+            \\
+            \\    function refreshGeneratedAppData() {
+            \\      loadMasterTableData();
+            \\      loadJoinedTableData();
+            \\      showModelAlert('success', 'Application data refreshed.');
+            \\    }
+            \\
+            \\    function exportJoinedData(format) {
+            \\      if (!joinedTableData.columns || joinedTableData.columns.length === 0) {
+            \\        alert('No data to export.');
+            \\        return;
+            \\      }
+            \\      const modelName = (currentModel.name || 'data_model').toLowerCase().replace(/[^a-z0-9_]/g, '_');
+            \\      if (format === 'csv') {
+            \\        const headers = joinedTableData.columns.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(',');
+            \\        const rows = joinedTableData.rows.map(r =>
+            \\          r.map(val => (val === null || val === undefined) ? '' : ('"' + String(val).replace(/"/g, '""') + '"')).join(',')
+            \\        ).join('\n');
+            \\        const csvContent = headers + '\n' + rows;
+            \\        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            \\        const url = URL.createObjectURL(blob);
+            \\        const a = document.createElement('a');
+            \\        a.href = url;
+            \\        a.download = modelName + '_joined.csv';
+            \\        a.click();
+            \\        URL.revokeObjectURL(url);
+            \\      } else if (format === 'json') {
+            \\        const jsonRows = joinedTableData.rows.map(r => {
+            \\          let obj = {};
+            \\          joinedTableData.columns.forEach((c, idx) => {
+            \\            obj[c] = r[idx];
+            \\          });
+            \\          return obj;
+            \\        });
+            \\        const blob = new Blob([JSON.stringify(jsonRows, null, 2)], { type: 'application/json' });
+            \\        const url = URL.createObjectURL(blob);
+            \\        const a = document.createElement('a');
+            \\        a.href = url;
+            \\        a.download = modelName + '_joined.json';
+            \\        a.click();
+            \\        URL.revokeObjectURL(url);
+            \\      }
+            \\    }
+            \\
+            \\    // ==========================================
+            \\    // SQL VIEW & CRUD MODAL LOGIC
+            \\    // ==========================================
+            \\    function showModelSqlModal() {
+            \\      generatedModelSql = buildModelSqlStatement();
+            \\      const codeEl = document.getElementById('modelSqlCode');
+            \\      if (codeEl) codeEl.innerText = generatedModelSql || '-- No tables in model to generate SQL view';
+            \\      const modal = document.getElementById('modelSqlModal');
+            \\      if (modal) modal.style.display = 'flex';
+            \\    }
+            \\
+            \\    function closeModelSqlModal() {
+            \\      const modal = document.getElementById('modelSqlModal');
+            \\      if (modal) modal.style.display = 'none';
+            \\    }
+            \\
+            \\    function copyModelSql() {
+            \\      if (!generatedModelSql) return;
+            \\      navigator.clipboard.writeText(generatedModelSql).then(() => {
+            \\        const btn = document.getElementById('copyModelSqlBtn');
+            \\        if (btn) {
+            \\          const orig = btn.innerText;
+            \\          btn.innerText = '✓ Copied!';
+            \\          setTimeout(() => { btn.innerText = orig; }, 2000);
+            \\        }
+            \\      });
+            \\    }
+            \\
+            \\    function runModelSqlInConsole() {
+            \\      closeModelSqlModal();
+            \\      switchMainTab('sql');
+            \\      const sqlInputEl = document.getElementById('sqlInput');
+            \\      if (sqlInputEl) {
+            \\        sqlInputEl.value = generatedModelSql;
+            \\        executeQuery();
+            \\      }
+            \\    }
+            \\
+            \\    async function openModelRecordModal(mode) {
+            \\      modelCrudTarget = mode;
+            \\      const targetTable = (mode === 'master') ? currentModel.masterTable : activeChildTable;
+            \\      if (!targetTable) {
+            \\        showModelAlert('error', 'No table selected.');
+            \\        return;
+            \\      }
+            \\
+            \\      const modalTitle = document.getElementById('modelCrudModalTitle');
+            \\      if (modalTitle) modalTitle.innerText = 'Add Record to ' + targetTable;
+            \\
+            \\      const schema = knownTables.find(t => t.name.toLowerCase() === targetTable.toLowerCase());
+            \\      if (!schema || !schema.columns) {
+            \\        showModelAlert('error', 'Schema not found for ' + targetTable);
+            \\        return;
+            \\      }
+            \\
+            \\      const container = document.getElementById('modelCrudFieldsContainer');
+            \\      if (!container) return;
+            \\      container.innerHTML = '<div style="color:#64748b;font-size:12px;">Loading form fields...</div>';
+            \\
+            \\      const modal = document.getElementById('modelCrudModal');
+            \\      if (modal) modal.style.display = 'flex';
+            \\
+            \\      let fieldsHtml = '';
+            \\      for (const col of schema.columns) {
+            \\        const isPk = !!col.primary_key;
+            \\        const isAi = !!col.auto_increment;
+            \\
+            \\        let fkLink = (currentModel.links || []).find(l =>
+            \\          (l.toTable.toLowerCase() === targetTable.toLowerCase() && l.toCol.toLowerCase() === col.name.toLowerCase()) ||
+            \\          (l.fromTable.toLowerCase() === targetTable.toLowerCase() && l.fromCol.toLowerCase() === col.name.toLowerCase())
+            \\        );
+            \\
+            \\        let parentTable = '';
+            \\        let parentPkCol = '';
+            \\        if (fkLink) {
+            \\          if (fkLink.toTable.toLowerCase() === targetTable.toLowerCase()) {
+            \\            parentTable = fkLink.fromTable;
+            \\            parentPkCol = fkLink.fromCol;
+            \\          } else {
+            \\            parentTable = fkLink.toTable;
+            \\            parentPkCol = fkLink.toCol;
+            \\          }
+            \\        }
+            \\
+            \\        fieldsHtml += '<div class="form-group">';
+            \\        fieldsHtml += '  <label class="form-label" style="display:flex;justify-content:space-between;align-items:center;">';
+            \\        fieldsHtml += '    <span>' + (isPk ? '🔑 ' : '') + '<strong>' + escapeHtml(col.name) + '</strong> <span class="badge-type">' + escapeHtml(col.type) + '</span></span>';
+            \\        if (parentTable) {
+            \\          fieldsHtml += '    <span style="font-size:10px;color:#38bdf8;">Linked \u2192 ' + escapeHtml(parentTable) + '.' + escapeHtml(parentPkCol) + '</span>';
+            \\        }
+            \\        fieldsHtml += '  </label>';
+            \\
+            \\        if (isPk && isAi) {
+            \\          fieldsHtml += '  <input type="text" class="form-control" placeholder="(Auto-increment assigned by StrataDB)" disabled style="background:#0f172a;opacity:0.75;font-family:monospace;" />';
+            \\        } else if (parentTable) {
+            \\          fieldsHtml += '  <select id="crud_input_' + escapeHtml(col.name) + '" class="form-control" data-col="' + escapeHtml(col.name) + '" data-type="' + escapeHtml(col.type) + '">';
+            \\          fieldsHtml += '    <option value="">&mdash; Select ' + escapeHtml(parentTable) + ' Record &mdash;</option>';
+            \\
+            \\          try {
+            \\            const pRes = await fetch('/api/query', {
+            \\              method: 'POST',
+            \\              headers: { 'Content-Type': 'application/json' },
+            \\              body: JSON.stringify({ query: 'SELECT * FROM ' + parentTable + ' LIMIT 50;' })
+            \\            });
+            \\            const pData = await pRes.json();
+            \\            if (pData.rows && pData.columns) {
+            \\              const pPkIdx = pData.columns.findIndex(c => c.toLowerCase() === parentPkCol.toLowerCase());
+            \\              const nameIdx = pData.columns.findIndex(c => ['name', 'title', 'label', 'description'].includes(c.toLowerCase()));
+            \\              for (const pRow of pData.rows) {
+            \\                const pVal = (pPkIdx >= 0) ? pRow[pPkIdx] : pRow[0];
+            \\                const pName = (nameIdx >= 0 && pRow[nameIdx]) ? (' &bull; ' + pRow[nameIdx]) : '';
+            \\                const isPreSel = (mode === 'child' && activeMasterRowId !== null && String(pVal) === String(activeMasterRowId)) ? ' selected' : '';
+            \\                fieldsHtml += '    <option value="' + escapeHtml(String(pVal)) + '"' + isPreSel + '>' + escapeHtml(String(pVal)) + pName + '</option>';
+            \\              }
+            \\            }
+            \\          } catch(e) {}
+            \\          fieldsHtml += '  </select>';
+            \\        } else if (col.type === 'INTEGER' || col.type === 'REAL') {
+            \\          fieldsHtml += '  <input type="number" step="any" id="crud_input_' + escapeHtml(col.name) + '" class="form-control" data-col="' + escapeHtml(col.name) + '" data-type="' + escapeHtml(col.type) + '" placeholder="Numeric value" style="font-family:monospace;" />';
+            \\        } else if (col.type === 'BOOLEAN') {
+            \\          fieldsHtml += '  <select id="crud_input_' + escapeHtml(col.name) + '" class="form-control" data-col="' + escapeHtml(col.name) + '" data-type="' + escapeHtml(col.type) + '">';
+            \\          fieldsHtml += '    <option value="true">true</option>';
+            \\          fieldsHtml += '    <option value="false" selected>false</option>';
+            \\          fieldsHtml += '  </select>';
+            \\        } else {
+            \\          fieldsHtml += '  <input type="text" id="crud_input_' + escapeHtml(col.name) + '" class="form-control" data-col="' + escapeHtml(col.name) + '" data-type="' + escapeHtml(col.type) + '" placeholder="Enter ' + escapeHtml(col.name) + '..." />';
+            \\        }
+            \\        fieldsHtml += '</div>';
+            \\      }
+            \\      container.innerHTML = fieldsHtml;
+            \\    }
+            \\
+            \\    function closeModelCrudModal() {
+            \\      const modal = document.getElementById('modelCrudModal');
+            \\      if (modal) modal.style.display = 'none';
+            \\      modelCrudTarget = null;
+            \\    }
+            \\
+            \\    async function submitModelCrud(event) {
+            \\      event.preventDefault();
+            \\      const targetTable = (modelCrudTarget === 'master') ? currentModel.masterTable : activeChildTable;
+            \\      if (!targetTable) return;
+            \\
+            \\      const container = document.getElementById('modelCrudFieldsContainer');
+            \\      if (!container) return;
+            \\      const inputs = container.querySelectorAll('[data-col]');
+            \\
+            \\      const cols = [];
+            \\      const vals = [];
+            \\
+            \\      for (const input of inputs) {
+            \\        const col = input.dataset.col;
+            \\        const type = input.dataset.type;
+            \\        const rawVal = input.value.trim();
+            \\
+            \\        if (rawVal === '') continue;
+            \\
+            \\        cols.push(col);
+            \\        if (type === 'INTEGER' || type === 'REAL') {
+            \\          vals.push(rawVal);
+            \\        } else if (type === 'BOOLEAN') {
+            \\          vals.push(rawVal.toLowerCase() === 'true' ? 'true' : 'false');
+            \\        } else {
+            \\          vals.push("'" + rawVal.replace(/'/g, "''") + "'");
+            \\        }
+            \\      }
+            \\
+            \\      if (cols.length === 0) {
+            \\        alert('Please fill in at least one field.');
+            \\        return;
+            \\      }
+            \\
+            \\      const insertSql = 'INSERT INTO ' + targetTable + ' (' + cols.join(', ') + ') VALUES (' + vals.join(', ') + ');';
+            \\
+            \\      try {
+            \\        const res = await fetch('/api/query', {
+            \\          method: 'POST',
+            \\          headers: { 'Content-Type': 'application/json' },
+            \\          body: JSON.stringify({ query: insertSql })
+            \\        });
+            \\        const data = await res.json();
+            \\        if (data.error) {
+            \\          alert('Failed to insert record: ' + data.error);
+            \\          return;
+            \\        }
+            \\
+            \\        closeModelCrudModal();
+            \\        showModelAlert('success', 'Record saved to ' + targetTable + '!');
+            \\
+            \\        if (modelCrudTarget === 'master') {
+            \\          await loadMasterTableData();
+            \\        } else {
+            \\          await loadChildTableData(activeChildTable);
+            \\        }
+            \\        loadJoinedTableData();
+            \\      } catch (err) {
+            \\        alert('Network error saving record: ' + err.message);
+            \\      }
+            \\    }
+            \\
             \\    document.addEventListener('keydown', (e) => {
             \\      if (e.key === 'Escape') {
-            \\        const modals = ['tableDataDetailModal', 'tableDataNewModal', 'tableDataEditModal', 'tableDataCountModal', 'excelImportModal'];
+            \\        const modals = ['tableDataDetailModal', 'tableDataNewModal', 'tableDataEditModal', 'tableDataCountModal', 'excelImportModal', 'modelSqlModal', 'modelCrudModal'];
             \\        for (const m of modals) {
             \\          const el = document.getElementById(m);
             \\          if (el && el.style.display !== 'none') {
             \\            el.style.display = 'none';
             \\            return;
             \\          }
+            \\        }
+            \\        if (pendingPort) {
+            \\          pendingPort = null;
+            \\          const tempPath = document.getElementById('tempWirePath');
+            \\          if (tempPath) tempPath.style.display = 'none';
+            \\          renderModelCanvas();
             \\        }
             \\      }
             \\      if (currentMainTab === 'tableData') {
@@ -4932,6 +6984,75 @@ pub const WebServer = struct {
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}",
             .{ json_buf.items.len, json_buf.items },
         ) catch {};
+    }
+
+    fn serveModelsList(self: *WebServer, stream: std.net.Stream) void {
+        const json_str = self.engine.models.getAllModelsJson(self.allocator) catch "[]";
+        defer if (!std.mem.eql(u8, json_str, "[]")) self.allocator.free(json_str);
+
+        const swriter = stream.writer();
+        swriter.print(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}",
+            .{ json_str.len, json_str },
+        ) catch {};
+    }
+
+    fn serveModelsSave(self: *WebServer, stream: std.net.Stream, body: []const u8) void {
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        const arena_alloc = arena.allocator();
+
+        const ModelPayload = struct {
+            name: []const u8,
+        };
+
+        const parsed = std.json.parseFromSlice(ModelPayload, arena_alloc, body, .{ .ignore_unknown_fields = true }) catch {
+            sendError(stream, 400, "Invalid JSON payload for model save");
+            return;
+        };
+
+        const model_name = std.mem.trim(u8, parsed.value.name, " \t\r\n");
+        if (model_name.len == 0) {
+            sendError(stream, 400, "Model name cannot be empty");
+            return;
+        }
+
+        self.engine.models.saveModel(model_name, body) catch |err| {
+            var err_buf: [128]u8 = undefined;
+            const emsg = std.fmt.bufPrint(&err_buf, "Failed to save model: {s}", .{@errorName(err)}) catch "Failed to save model";
+            sendError(stream, 500, emsg);
+            return;
+        };
+
+        self.sendSuccess(stream, "Data model saved successfully");
+    }
+
+    fn serveModelsDelete(self: *WebServer, stream: std.net.Stream, body: []const u8) void {
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        const arena_alloc = arena.allocator();
+
+        const ModelPayload = struct {
+            name: []const u8,
+        };
+
+        const parsed = std.json.parseFromSlice(ModelPayload, arena_alloc, body, .{ .ignore_unknown_fields = true }) catch {
+            sendError(stream, 400, "Invalid JSON payload for model delete");
+            return;
+        };
+
+        const model_name = std.mem.trim(u8, parsed.value.name, " \t\r\n");
+        if (model_name.len == 0) {
+            sendError(stream, 400, "Model name cannot be empty");
+            return;
+        }
+
+        const deleted = self.engine.models.deleteModel(model_name) catch false;
+        if (deleted) {
+            self.sendSuccess(stream, "Data model deleted successfully");
+        } else {
+            sendError(stream, 404, "Data model not found");
+        }
     }
 
     fn serveCreateTable(self: *WebServer, stream: std.net.Stream, body: []const u8) void {

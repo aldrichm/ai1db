@@ -434,19 +434,40 @@ pub const Parser = struct {
                     }
                     _ = try self.expect(.rparen);
 
+                    var alias: ?[]const u8 = null;
+                    if (self.match(.kw_as)) {
+                        const atok = try self.expect(.identifier);
+                        alias = try self.allocator.dupe(u8, atok.lexeme);
+                    }
+
                     try items.append(.{
                         .aggregate = agg_type,
                         .column_name = agg_col,
+                        .alias = alias,
                     });
                 } else if (self.match(.dot)) {
                     const col_tok = try self.expect(.identifier);
+                    var alias: ?[]const u8 = null;
+                    if (self.match(.kw_as)) {
+                        const atok = try self.expect(.identifier);
+                        alias = try self.allocator.dupe(u8, atok.lexeme);
+                    }
+
                     try items.append(.{
                         .table_name = try self.allocator.dupe(u8, id_tok.lexeme),
                         .column_name = try self.allocator.dupe(u8, col_tok.lexeme),
+                        .alias = alias,
                     });
                 } else {
+                    var alias: ?[]const u8 = null;
+                    if (self.match(.kw_as)) {
+                        const atok = try self.expect(.identifier);
+                        alias = try self.allocator.dupe(u8, atok.lexeme);
+                    }
+
                     try items.append(.{
                         .column_name = try self.allocator.dupe(u8, id_tok.lexeme),
+                        .alias = alias,
                     });
                 }
             }
@@ -457,10 +478,23 @@ pub const Parser = struct {
 
         _ = try self.expect(.kw_from);
         const from_tok = try self.expect(.identifier);
+        if (self.match(.kw_as)) {
+            _ = try self.expect(.identifier);
+        } else if (self.check(.identifier) and !self.check(.kw_where) and !self.check(.kw_join) and !self.check(.kw_order) and !self.check(.kw_limit)) {
+            _ = self.advance();
+        }
 
         var join_clause: ?JoinClause = null;
+        _ = self.match(.kw_left);
+        _ = self.match(.kw_inner);
         if (self.match(.kw_join)) {
             const jtable = try self.expect(.identifier);
+            if (self.match(.kw_as)) {
+                _ = try self.expect(.identifier);
+            } else if (self.check(.identifier) and !self.check(.kw_on)) {
+                _ = self.advance();
+            }
+
             _ = try self.expect(.kw_on);
             const ltok = try self.expect(.identifier);
             _ = try self.expect(.dot);

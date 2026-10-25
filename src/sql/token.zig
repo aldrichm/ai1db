@@ -15,12 +15,15 @@ pub const TokenType = enum {
     kw_table,
     kw_drop,
     kw_join,
+    kw_left,
+    kw_inner,
     kw_on,
     kw_and,
     kw_or,
     kw_not,
     kw_order,
     kw_by,
+    kw_as,
     kw_asc,
     kw_desc,
     kw_limit,
@@ -221,12 +224,15 @@ pub const Lexer = struct {
         if (std.ascii.eqlIgnoreCase(lexeme, "TABLE")) return .kw_table;
         if (std.ascii.eqlIgnoreCase(lexeme, "DROP")) return .kw_drop;
         if (std.ascii.eqlIgnoreCase(lexeme, "JOIN")) return .kw_join;
+        if (std.ascii.eqlIgnoreCase(lexeme, "LEFT")) return .kw_left;
+        if (std.ascii.eqlIgnoreCase(lexeme, "INNER")) return .kw_inner;
         if (std.ascii.eqlIgnoreCase(lexeme, "ON")) return .kw_on;
         if (std.ascii.eqlIgnoreCase(lexeme, "AND")) return .kw_and;
         if (std.ascii.eqlIgnoreCase(lexeme, "OR")) return .kw_or;
         if (std.ascii.eqlIgnoreCase(lexeme, "NOT")) return .kw_not;
         if (std.ascii.eqlIgnoreCase(lexeme, "ORDER")) return .kw_order;
         if (std.ascii.eqlIgnoreCase(lexeme, "BY")) return .kw_by;
+        if (std.ascii.eqlIgnoreCase(lexeme, "AS")) return .kw_as;
         if (std.ascii.eqlIgnoreCase(lexeme, "ASC")) return .kw_asc;
         if (std.ascii.eqlIgnoreCase(lexeme, "DESC")) return .kw_desc;
         if (std.ascii.eqlIgnoreCase(lexeme, "LIMIT")) return .kw_limit;
