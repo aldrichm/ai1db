@@ -1492,6 +1492,15 @@ pub const WebServer = struct {
             \\      border-color: #38bdf8;
             \\      box-shadow: 0 0 0 2px var(--accent-glow);
             \\    }
+            \\    .model-card.dragging {
+            \\      border-color: #38bdf8 !important;
+            \\      box-shadow: 0 16px 36px rgba(56, 189, 248, 0.45) !important;
+            \\      opacity: 0.95;
+            \\      z-index: 100 !important;
+            \\    }
+            \\    .model-card.dragging .model-card-header {
+            \\      cursor: grabbing !important;
+            \\    }
             \\    .model-card-header {
             \\      padding: 8px 12px;
             \\      background: #1e293b;
@@ -1500,7 +1509,11 @@ pub const WebServer = struct {
             \\      display: flex;
             \\      justify-content: space-between;
             \\      align-items: center;
-            \\      cursor: move;
+            \\      cursor: grab;
+            \\      user-select: none;
+            \\    }
+            \\    .model-card-header:active {
+            \\      cursor: grabbing;
             \\    }
             \\    .model-card-title {
             \\      font-weight: 700;
@@ -2508,8 +2521,8 @@ pub const WebServer = struct {
             \\          <span id="canvasSummaryText" style="font-size: 11px; color: var(--text-muted);">0 Tables &bull; 0 Links</span>
             \\        </div>
             \\
-            \\        <div id="canvasViewport" class="canvas-viewport" ondragover="onCanvasDragOver(event)" ondrop="onCanvasDrop(event)" onclick="onCanvasClick(event)" onmousemove="onCanvasMouseMove(event)">
-            \\          <div id="canvasWorld" class="canvas-world">
+            \\        <div id="canvasViewport" class="canvas-viewport" ondragover="onCanvasDragOver(event)" ondragenter="onCanvasDragOver(event)" ondrop="onCanvasDrop(event)" onclick="onCanvasClick(event)" onmousemove="onCanvasMouseMove(event)" onmouseup="stopCardDrag(event)" onmouseleave="stopCardDrag(event)">
+            \\          <div id="canvasWorld" class="canvas-world" ondragover="onCanvasDragOver(event)" ondragenter="onCanvasDragOver(event)" ondrop="onCanvasDrop(event)">
             \\            <svg id="modelCanvasSvg" class="canvas-svg">
             \\              <defs>
             \\                <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -5493,6 +5506,9 @@ pub const WebServer = struct {
             \\    }
             \\
             \\    async function initModelBuilder() {
+            \\      if (!knownTables || knownTables.length === 0) {
+            \\        await loadSchema();
+            \\      }
             \\      await fetchModelsList();
             \\      renderModelPalette();
             \\      renderModelCanvas();
@@ -5627,7 +5643,8 @@ pub const WebServer = struct {
             \\      for (const t of filtered) {
             \\        const onCanvas = currentModel.tables && currentModel.tables.some(ct => ct.name.toLowerCase() === t.name.toLowerCase());
             \\        const cols = t.columns || [];
-            \\        html += '<div class="palette-item" draggable="true" ondragstart="onPaletteDragStart(event, \'' + escapeHtml(t.name) + '\')">';
+            \\        const clickHandler = onCanvas ? '' : ' onclick="if(!event.target.closest(\'button\')) addTableToCanvas(\'' + escapeHtml(t.name) + '\')" style="cursor:pointer;"';
+            \\        html += '<div class="palette-item" draggable="' + (onCanvas ? 'false' : 'true') + '" ondragstart="onPaletteDragStart(event, \'' + escapeHtml(t.name) + '\')" ondragend="onPaletteDragEnd(event)"' + clickHandler + ' title="' + (onCanvas ? 'Already on canvas' : 'Click or drag onto canvas') + '">';
             \\        html += '  <div style="display:flex;justify-content:space-between;align-items:center;">';
             \\        html += '    <strong style="color:#f8fafc;font-size:12px;">' + escapeHtml(t.name) + '</strong>';
             \\        if (onCanvas) {
@@ -5644,24 +5661,48 @@ pub const WebServer = struct {
             \\      container.innerHTML = html;
             \\    }
             \\
+            \\    let draggedPaletteTable = null;
+            \\
             \\    function onPaletteDragStart(e, tableName) {
-            \\      e.dataTransfer.setData('text/plain', tableName);
-            \\      e.dataTransfer.effectAllowed = 'copy';
+            \\      draggedPaletteTable = tableName;
+            \\      if (e.dataTransfer) {
+            \\        try { e.dataTransfer.setData('text/plain', tableName); } catch (_) {}
+            \\        try { e.dataTransfer.setData('text', tableName); } catch (_) {}
+            \\        e.dataTransfer.effectAllowed = 'copy';
+            \\      }
+            \\    }
+            \\
+            \\    function onPaletteDragEnd(e) {
+            \\      draggedPaletteTable = null;
             \\    }
             \\
             \\    function onCanvasDragOver(e) {
             \\      e.preventDefault();
-            \\      e.dataTransfer.dropEffect = 'copy';
+            \\      if (e.dataTransfer) {
+            \\        e.dataTransfer.dropEffect = 'copy';
+            \\      }
             \\    }
             \\
             \\    function onCanvasDrop(e) {
             \\      e.preventDefault();
-            \\      const tableName = e.dataTransfer.getData('text/plain');
+            \\      e.stopPropagation();
+            \\      let tableName = null;
+            \\      if (e.dataTransfer) {
+            \\        try { tableName = e.dataTransfer.getData('text/plain'); } catch (_) {}
+            \\        if (!tableName) {
+            \\          try { tableName = e.dataTransfer.getData('text'); } catch (_) {}
+            \\        }
+            \\      }
+            \\      if (!tableName && draggedPaletteTable) {
+            \\        tableName = draggedPaletteTable;
+            \\      }
+            \\      draggedPaletteTable = null;
             \\      if (!tableName) return;
+            \\      tableName = tableName.trim();
             \\      const vp = document.getElementById('canvasViewport');
             \\      const rect = vp.getBoundingClientRect();
-            \\      const x = Math.max(20, Math.round(e.clientX - rect.left + vp.scrollLeft - 100));
-            \\      const y = Math.max(20, Math.round(e.clientY - rect.top + vp.scrollTop - 30));
+            \\      const x = Math.max(20, Math.round(e.clientX - rect.left + vp.scrollLeft - 130));
+            \\      const y = Math.max(20, Math.round(e.clientY - rect.top + vp.scrollTop - 20));
             \\      addTableToCanvas(tableName, x, y);
             \\    }
             \\
@@ -5746,6 +5787,7 @@ pub const WebServer = struct {
             \\    }
             \\
             \\    function startCardDrag(e, tableName) {
+            \\      if (e.button !== undefined && e.button !== 0) return;
             \\      if (e.target.closest('button') || e.target.closest('input') || e.target.closest('.port-anchor')) return;
             \\      const tbl = currentModel.tables.find(t => t.name.toLowerCase() === tableName.toLowerCase());
             \\      if (!tbl) return;
@@ -5756,17 +5798,39 @@ pub const WebServer = struct {
             \\        origX: tbl.x,
             \\        origY: tbl.y
             \\      };
+            \\      const cardEl = document.getElementById('model_card_' + tbl.name);
+            \\      if (cardEl) {
+            \\        cardEl.classList.add('dragging');
+            \\        cardEl.style.zIndex = '100';
+            \\      }
             \\      e.preventDefault();
+            \\    }
+            \\
+            \\    function stopCardDrag(e) {
+            \\      try {
+            \\        document.querySelectorAll('.model-card.dragging').forEach(el => {
+            \\          el.classList.remove('dragging');
+            \\          el.style.zIndex = '20';
+            \\        });
+            \\      } catch (_) {}
+            \\      if (draggingCard) {
+            \\        draggingCard = null;
+            \\        renderModelLinks();
+            \\      }
             \\    }
             \\
             \\    function onCanvasMouseMove(e) {
             \\      if (draggingCard) {
+            \\        if (e.buttons === 0) {
+            \\          stopCardDrag(e);
+            \\          return;
+            \\        }
             \\        const dx = e.clientX - draggingCard.startX;
             \\        const dy = e.clientY - draggingCard.startY;
             \\        const tbl = currentModel.tables.find(t => t.name.toLowerCase() === draggingCard.tableName.toLowerCase());
             \\        if (tbl) {
-            \\          tbl.x = Math.max(10, draggingCard.origX + dx);
-            \\          tbl.y = Math.max(10, draggingCard.origY + dy);
+            \\          tbl.x = Math.max(10, Math.min(2100, draggingCard.origX + dx));
+            \\          tbl.y = Math.max(10, Math.min(1400, draggingCard.origY + dy));
             \\          const cardEl = document.getElementById('model_card_' + tbl.name);
             \\          if (cardEl) {
             \\            cardEl.style.left = tbl.x + 'px';
@@ -5795,6 +5859,9 @@ pub const WebServer = struct {
             \\    }
             \\
             \\    function onCanvasClick(e) {
+            \\      if (draggingCard) {
+            \\        stopCardDrag(e);
+            \\      }
             \\      if (pendingPort && !e.target.closest('.port-anchor')) {
             \\        pendingPort = null;
             \\        const tempPath = document.getElementById('tempWirePath');
@@ -5947,7 +6014,7 @@ pub const WebServer = struct {
             \\      for (const tbl of currentModel.tables) {
             \\        const isMaster = currentModel.masterTable && currentModel.masterTable.toLowerCase() === tbl.name.toLowerCase();
             \\        cardsHtml += '<div id="model_card_' + escapeHtml(tbl.name) + '" class="model-card" style="left:' + tbl.x + 'px; top:' + tbl.y + 'px;">';
-            \\        cardsHtml += '  <div class="model-card-header" onmousedown="startCardDrag(event, \'' + escapeHtml(tbl.name) + '\')">';
+            \\        cardsHtml += '  <div class="model-card-header" onmousedown="startCardDrag(event, \'' + escapeHtml(tbl.name) + '\')" onmouseup="stopCardDrag(event)">';
             \\        cardsHtml += '    <div style="display:flex;align-items:center;gap:6px;overflow:hidden;">';
             \\        cardsHtml += '      <strong style="color:#f8fafc;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(tbl.name) + '</strong>';
             \\        if (isMaster) {
@@ -6745,8 +6812,19 @@ pub const WebServer = struct {
             \\      }
             \\    }
             \\
+            \\    document.addEventListener('mousemove', (e) => {
+            \\      if (typeof onCanvasMouseMove === 'function') onCanvasMouseMove(e);
+            \\    });
+            \\    document.addEventListener('mouseup', (e) => {
+            \\      if (typeof stopCardDrag === 'function') stopCardDrag(e);
+            \\    });
+            \\    window.addEventListener('blur', () => {
+            \\      if (typeof stopCardDrag === 'function') stopCardDrag();
+            \\    });
+            \\
             \\    document.addEventListener('keydown', (e) => {
             \\      if (e.key === 'Escape') {
+            \\        if (typeof stopCardDrag === 'function') stopCardDrag(e);
             \\        const modals = ['tableDataDetailModal', 'tableDataNewModal', 'tableDataEditModal', 'tableDataCountModal', 'excelImportModal', 'modelSqlModal', 'modelCrudModal'];
             \\        for (const m of modals) {
             \\          const el = document.getElementById(m);
