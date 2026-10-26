@@ -201,32 +201,52 @@ fn executeSingle(
     const pfx = std.ascii.lowerString(&lower_buf, trimmed_q[0..pfx_len]);
 
     if (std.mem.startsWith(u8, pfx, "import mariadb") or std.mem.startsWith(u8, pfx, "import ")) {
+        var raw_path: []const u8 = "";
         var path_start: ?usize = null;
         var quote_char: ?u8 = null;
         for (trimmed_q, 0..) |c, i| {
-            if (c == '\'' or c == '"') {
+            if (c == '\'' or c == '"' or c == '`') {
                 if (path_start == null) {
                     path_start = i + 1;
                     quote_char = c;
                 } else if (c == quote_char.?) {
-                    const file_path = trimmed_q[path_start.?..i];
-                    try writer.print("Importing MariaDB 11.3 dump file: \x1b[36m{s}\x1b[0m...\n", .{file_path});
-                    var importer = MariaDbImporter.init(allocator, engine);
-                    const res = importer.importFile(file_path) catch |err| {
-                        try writer.print("\x1b[31mImport failed: {any}\x1b[0m\n", .{err});
-                        return;
-                    };
-                    try writer.print("\x1b[32m✔ MariaDB 11.3 Import Succeeded!\x1b[0m\n", .{});
-                    try writer.print("  • Tables Created:       {d}\n", .{res.tables_created});
-                    try writer.print("  • Rows Inserted:        {d}\n", .{res.rows_inserted});
-                    try writer.print("  • Statements Processed: {d}\n", .{res.statements_processed});
-                    try writer.print("  • Statements Skipped:   {d}\n", .{res.statements_skipped});
-                    try writer.print("  • Errors:               {d}\n", .{res.errors});
-                    return;
+                    raw_path = trimmed_q[path_start.?..i];
+                    break;
                 }
             }
         }
-        try writer.print("\x1b[31mUsage: IMPORT MARIADB '<filepath.sql>';\x1b[0m\n", .{});
+
+        if (raw_path.len == 0) {
+            const kw_len: usize = if (std.mem.startsWith(u8, pfx, "import mariadb")) 14 else 6;
+            if (trimmed_q.len > kw_len) {
+                const unquoted = std.mem.trim(u8, trimmed_q[kw_len..], " \t\r\n;");
+                if (unquoted.len > 0) {
+                    raw_path = unquoted;
+                }
+            }
+        }
+
+        if (raw_path.len == 0) {
+            try writer.print("\x1b[31mUsage: IMPORT MARIADB '<filepath.sql>';\x1b[0m\n", .{});
+            return;
+        }
+
+        try writer.print("Importing MariaDB 11.3 dump file: \x1b[36m{s}\x1b[0m...\n", .{raw_path});
+        var importer = MariaDbImporter.init(allocator, engine);
+        const res = importer.importFile(raw_path) catch |err| {
+            if (err == error.FileNotFound) {
+                try writer.print("\x1b[31mImport failed: File not found ('{s}'). Searched direct path, ./dumps, and project root.\x1b[0m\n", .{raw_path});
+            } else {
+                try writer.print("\x1b[31mImport failed: {any}\x1b[0m\n", .{err});
+            }
+            return;
+        };
+        try writer.print("\x1b[32m✔ MariaDB 11.3 Import Succeeded!\x1b[0m\n", .{});
+        try writer.print("  • Tables Created:       {d}\n", .{res.tables_created});
+        try writer.print("  • Rows Inserted:        {d}\n", .{res.rows_inserted});
+        try writer.print("  • Statements Processed: {d}\n", .{res.statements_processed});
+        try writer.print("  • Statements Skipped:   {d}\n", .{res.statements_skipped});
+        try writer.print("  • Errors:               {d}\n", .{res.errors});
         return;
     } else if (std.mem.startsWith(u8, pfx, "/*!") or std.mem.startsWith(u8, pfx, "-- mariadb") or std.mem.startsWith(u8, pfx, "/*m!")) {
         var importer = MariaDbImporter.init(allocator, engine);

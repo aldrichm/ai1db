@@ -8477,48 +8477,67 @@ pub const WebServer = struct {
         const pfx = std.ascii.lowerString(&lower_buf, trimmed_q[0..pfx_len]);
 
         if (std.mem.startsWith(u8, pfx, "import mariadb") or std.mem.startsWith(u8, pfx, "import ")) {
+            var raw_path: []const u8 = "";
             var path_start: ?usize = null;
             var quote_char: ?u8 = null;
             for (trimmed_q, 0..) |c, i| {
-                if (c == '\'' or c == '"') {
+                if (c == '\'' or c == '"' or c == '`') {
                     if (path_start == null) {
                         path_start = i + 1;
                         quote_char = c;
                     } else if (c == quote_char.?) {
-                        const file_path = trimmed_q[path_start.?..i];
-                        var importer = MariaDbImporter.init(self.allocator, self.engine);
-                        const res = importer.importFile(file_path) catch |err| {
-                            var err_buf: [256]u8 = undefined;
-                            const msg = std.fmt.bufPrint(&err_buf, "MariaDB import failed: {s}", .{@errorName(err)}) catch "MariaDB import failed";
-                            sendError(stream, 400, msg);
-                            return;
-                        };
-
-                        var json_buf = std.ArrayList(u8).init(self.allocator);
-                        defer json_buf.deinit();
-                        const writer = json_buf.writer();
-                        var msg_buf: [256]u8 = undefined;
-                        const ok_msg = std.fmt.bufPrint(&msg_buf, "MariaDB 11.3 Import Succeeded! Tables Created: {d}, Rows Inserted: {d}, Statements Processed: {d}, Skipped: {d}, Errors: {d}", .{
-                            res.tables_created,
-                            res.rows_inserted,
-                            res.statements_processed,
-                            res.statements_skipped,
-                            res.errors,
-                        }) catch "MariaDB import completed.";
-                        writer.print("{{\"columns\":[],\"rows\":[],\"message\":", .{}) catch return;
-                        writeJsonString(writer, ok_msg) catch return;
-                        writer.writeAll("}") catch return;
-
-                        const swriter = stream.writer();
-                        swriter.print(
-                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}",
-                            .{ json_buf.items.len, json_buf.items },
-                        ) catch {};
-                        return;
+                        raw_path = trimmed_q[path_start.?..i];
+                        break;
                     }
                 }
             }
-            sendError(stream, 400, "Usage: IMPORT MARIADB '<filepath.sql>';");
+
+            if (raw_path.len == 0) {
+                const kw_len: usize = if (std.mem.startsWith(u8, pfx, "import mariadb")) 14 else 6;
+                if (trimmed_q.len > kw_len) {
+                    const unquoted = std.mem.trim(u8, trimmed_q[kw_len..], " \t\r\n;");
+                    if (unquoted.len > 0) {
+                        raw_path = unquoted;
+                    }
+                }
+            }
+
+            if (raw_path.len == 0) {
+                sendError(stream, 400, "Usage: IMPORT MARIADB '<filepath.sql>';");
+                return;
+            }
+
+            var importer = MariaDbImporter.init(self.allocator, self.engine);
+            const res = importer.importFile(raw_path) catch |err| {
+                var err_buf: [512]u8 = undefined;
+                const msg = if (err == error.FileNotFound)
+                    std.fmt.bufPrint(&err_buf, "MariaDB import failed: File not found ('{s}'). Checked direct path, ./dumps, and project root.", .{raw_path}) catch "MariaDB import failed: File not found"
+                else
+                    std.fmt.bufPrint(&err_buf, "MariaDB import failed: {s}", .{@errorName(err)}) catch "MariaDB import failed";
+                sendError(stream, 400, msg);
+                return;
+            };
+
+            var json_buf = std.ArrayList(u8).init(self.allocator);
+            defer json_buf.deinit();
+            const writer = json_buf.writer();
+            var msg_buf: [256]u8 = undefined;
+            const ok_msg = std.fmt.bufPrint(&msg_buf, "MariaDB 11.3 Import Succeeded! Tables Created: {d}, Rows Inserted: {d}, Statements Processed: {d}, Skipped: {d}, Errors: {d}", .{
+                res.tables_created,
+                res.rows_inserted,
+                res.statements_processed,
+                res.statements_skipped,
+                res.errors,
+            }) catch "MariaDB import completed.";
+            writer.print("{{\"columns\":[],\"rows\":[],\"message\":", .{}) catch return;
+            writeJsonString(writer, ok_msg) catch return;
+            writer.writeAll("}") catch return;
+
+            const swriter = stream.writer();
+            swriter.print(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}",
+                .{ json_buf.items.len, json_buf.items },
+            ) catch {};
             return;
         } else if (std.mem.startsWith(u8, pfx, "/*!") or std.mem.startsWith(u8, pfx, "-- mariadb") or std.mem.startsWith(u8, pfx, "/*m!")) {
             var importer = MariaDbImporter.init(self.allocator, self.engine);

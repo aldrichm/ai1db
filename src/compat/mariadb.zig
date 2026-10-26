@@ -164,8 +164,92 @@ pub const MariaDbImporter = struct {
         };
     }
 
+    pub fn openDumpFile(allocator: std.mem.Allocator, raw_path: []const u8) !std.fs.File {
+        var trimmed = std.mem.trim(u8, raw_path, " \t\r\n;");
+        // Strip surrounding quotes
+        if ((trimmed.len >= 2 and trimmed[0] == '\'' and trimmed[trimmed.len - 1] == '\'') or
+            (trimmed.len >= 2 and trimmed[0] == '"' and trimmed[trimmed.len - 1] == '"') or
+            (trimmed.len >= 2 and trimmed[0] == '`' and trimmed[trimmed.len - 1] == '`'))
+        {
+            trimmed = trimmed[1 .. trimmed.len - 1];
+        }
+        trimmed = std.mem.trim(u8, trimmed, " \t\r\n;");
+
+        // 1. Try directly via cwd
+        if (std.fs.cwd().openFile(trimmed, .{})) |f| {
+            return f;
+        } else |_| {}
+
+        // 2. Try as absolute path if it starts with '/'
+        if (std.fs.path.isAbsolute(trimmed)) {
+            if (std.fs.openFileAbsolute(trimmed, .{})) |f| {
+                return f;
+            } else |_| {}
+        }
+
+        // 3. If starts with leading slash (e.g. '/dumps/pm_assembly1_14.sql'), strip slash and try relative to cwd
+        if (trimmed.len > 1 and trimmed[0] == '/') {
+            const no_slash = trimmed[1..];
+            if (std.fs.cwd().openFile(no_slash, .{})) |f| {
+                return f;
+            } else |_| {}
+        }
+
+        // 4. Try home directory expansion if starts with '~'
+        if (trimmed.len > 0 and trimmed[0] == '~') {
+            if (std.posix.getenv("HOME")) |home| {
+                const rel_part = if (trimmed.len >= 2 and trimmed[1] == '/') trimmed[2..] else trimmed[1..];
+                const expanded = std.fs.path.join(allocator, &.{ home, rel_part }) catch null;
+                if (expanded) |exp| {
+                    defer allocator.free(exp);
+                    if (std.fs.openFileAbsolute(exp, .{})) |f| {
+                        return f;
+                    } else |_| {}
+                }
+            }
+        }
+
+        // 5. Try inside `./dumps/<basename>`
+        const basename = std.fs.path.basename(trimmed);
+        const in_dumps = std.fs.path.join(allocator, &.{ "dumps", basename }) catch null;
+        if (in_dumps) |idp| {
+            defer allocator.free(idp);
+            if (std.fs.cwd().openFile(idp, .{})) |f| {
+                return f;
+            } else |_| {}
+        }
+
+        // 6. Try relative to executable directory (e.g. zig-out/bin -> project root)
+        var exe_buf: [1024]u8 = undefined;
+        if (std.fs.selfExePath(&exe_buf)) |exe_path| {
+            if (std.fs.path.dirname(exe_path)) |bin_dir| {
+                if (std.fs.path.dirname(bin_dir)) |zig_out_dir| {
+                    if (std.fs.path.dirname(zig_out_dir)) |project_dir| {
+                        const from_project = std.fs.path.join(allocator, &.{ project_dir, trimmed }) catch null;
+                        if (from_project) |fp| {
+                            defer allocator.free(fp);
+                            if (std.fs.openFileAbsolute(fp, .{})) |f| {
+                                return f;
+                            } else |_| {}
+                        }
+
+                        const from_project_dumps = std.fs.path.join(allocator, &.{ project_dir, "dumps", basename }) catch null;
+                        if (from_project_dumps) |fpd| {
+                            defer allocator.free(fpd);
+                            if (std.fs.openFileAbsolute(fpd, .{})) |f| {
+                                return f;
+                            } else |_| {}
+                        }
+                    }
+                }
+            }
+        } else |_| {}
+
+        return error.FileNotFound;
+    }
+
     pub fn importFile(self: *MariaDbImporter, file_path: []const u8) !ImportResult {
-        const file = try std.fs.cwd().openFile(file_path, .{});
+        const file = try openDumpFile(self.allocator, file_path);
         defer file.close();
 
         const stat = try file.stat();
