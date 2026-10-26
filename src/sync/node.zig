@@ -191,7 +191,17 @@ pub const SyncManager = struct {
         }
     }
 
+    pub fn hasActivePeers(self: *SyncManager) bool {
+        self.peers_mutex.lock();
+        defer self.peers_mutex.unlock();
+        for (self.active_peers.items) |peer| {
+            if (peer.is_alive and !peer.is_closed) return true;
+        }
+        return false;
+    }
+
     pub fn broadcastTableSync(self: *SyncManager, table_name: []const u8) void {
+        if (!self.hasActivePeers()) return;
         _ = self.engine.getTableRowCount(table_name) orelse return;
         const chunk_size: usize = 20000;
         var offset: usize = 0;
@@ -236,6 +246,7 @@ pub const SyncManager = struct {
     }
 
     pub fn broadcastDdlDrop(self: *SyncManager, table_name: []const u8) void {
+        if (!self.hasActivePeers()) return;
         var buf = std.ArrayList(u8).init(self.allocator);
         defer buf.deinit();
         const writer = buf.writer();
@@ -592,6 +603,7 @@ pub const SyncManager = struct {
     }
 
     pub fn broadcastLiveMutation(self: *SyncManager, record: ChangeRecord) void {
+        if (!self.hasActivePeers()) return;
         var buf = std.ArrayList(u8).init(self.allocator);
         defer buf.deinit();
         record.serialize(buf.writer()) catch return;
