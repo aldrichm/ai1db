@@ -371,7 +371,26 @@ pub const Engine = struct {
         if (on_ddl) |cb| cb(listener_ctx.?, table_name, false);
     }
 
+    pub fn getTableRowCount(self: *Engine, table_name: []const u8) ?usize {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        const table = self.tables.get(table_name) orelse return null;
+        table.mutex.lock();
+        defer table.mutex.unlock();
+        return table.rows.items.len;
+    }
+
     pub fn createTableSnapshot(self: *Engine, table_name: []const u8, allocator: std.mem.Allocator) !?TableSnapshot {
+        return self.createTableSnapshotChunked(table_name, allocator, 0, std.math.maxInt(usize));
+    }
+
+    pub fn createTableSnapshotChunked(
+        self: *Engine,
+        table_name: []const u8,
+        allocator: std.mem.Allocator,
+        offset: usize,
+        limit: usize,
+    ) !?TableSnapshot {
         self.mutex.lock();
         defer self.mutex.unlock();
 
@@ -388,8 +407,12 @@ pub const Engine = struct {
             s.deinit(allocator);
         }
 
-        const tbl_desc = self.metadata.getTableDescription(table.name);
-        const dup_desc = try allocator.dupe(u8, tbl_desc);
+        const is_first_chunk = (offset == 0);
+
+        const dup_desc = if (is_first_chunk) blk: {
+            const tbl_desc = self.metadata.getTableDescription(table.name);
+            break :blk try allocator.dupe(u8, tbl_desc);
+        } else try allocator.dupe(u8, "");
         errdefer allocator.free(dup_desc);
 
         var col_descs = std.ArrayList(ColumnDesc).init(allocator);
@@ -401,17 +424,23 @@ pub const Engine = struct {
             col_descs.deinit();
         }
 
-        for (table.schema.columns) |col| {
-            const cd_val = self.metadata.getColumnDescription(table.name, col.name);
-            if (cd_val.len > 0) {
-                try col_descs.append(ColumnDesc{
-                    .col_name = try allocator.dupe(u8, col.name),
-                    .desc = try allocator.dupe(u8, cd_val),
-                });
+        if (is_first_chunk) {
+            for (table.schema.columns) |col| {
+                const cd_val = self.metadata.getColumnDescription(table.name, col.name);
+                if (cd_val.len > 0) {
+                    try col_descs.append(ColumnDesc{
+                        .col_name = try allocator.dupe(u8, col.name),
+                        .desc = try allocator.dupe(u8, cd_val),
+                    });
+                }
             }
         }
 
-        var rows = try allocator.alloc(RowSnapshot, table.rows.items.len);
+        const total_rows = table.rows.items.len;
+        const chunk_end = @min(offset + limit, total_rows);
+        const chunk_count = if (offset < total_rows) (chunk_end - offset) else 0;
+
+        var rows = try allocator.alloc(RowSnapshot, chunk_count);
         errdefer allocator.free(rows);
         var r_i: usize = 0;
         errdefer {
@@ -420,36 +449,45 @@ pub const Engine = struct {
                 rw.deinit(allocator);
             }
         }
-        for (table.rows.items, 0..) |row, i| {
-            const cloned_row = try row.clone(allocator);
-            const hlc = if (try table.getRowPrimaryKeyString(row)) |pk_str| blk: {
-                defer table.allocator.free(pk_str);
-                break :blk table.row_hlcs.get(pk_str) orelse HLC.zero;
-            } else blk: {
-                var buf: [32]u8 = undefined;
-                const synth_key = std.fmt.bufPrint(&buf, "__row_{d}", .{i + 1}) catch "";
-                break :blk table.row_hlcs.get(synth_key) orelse HLC.zero;
-            };
-            rows[i] = RowSnapshot{
-                .row = cloned_row,
-                .hlc = hlc,
-            };
-            r_i += 1;
+        if (offset < total_rows) {
+            for (table.rows.items[offset..chunk_end], 0..) |row, i| {
+                const cloned_row = try row.clone(allocator);
+                const global_idx = offset + i;
+                const hlc = if (try table.getRowPrimaryKeyString(row)) |pk_str| blk: {
+                    defer table.allocator.free(pk_str);
+                    break :blk table.row_hlcs.get(pk_str) orelse HLC.zero;
+                } else blk: {
+                    var buf: [32]u8 = undefined;
+                    const synth_key = std.fmt.bufPrint(&buf, "__row_{d}", .{global_idx + 1}) catch "";
+                    break :blk table.row_hlcs.get(synth_key) orelse HLC.zero;
+                };
+                rows[i] = RowSnapshot{
+                    .row = cloned_row,
+                    .hlc = hlc,
+                };
+                r_i += 1;
+            }
         }
 
-        var tombstones = try allocator.alloc(TombstoneSnapshot, table.tombstones.count());
+        var tombstones = if (is_first_chunk)
+            try allocator.alloc(TombstoneSnapshot, table.tombstones.count())
+        else
+            try allocator.alloc(TombstoneSnapshot, 0);
         errdefer allocator.free(tombstones);
-        var t_i: usize = 0;
-        errdefer {
-            for (tombstones[0..t_i]) |t| allocator.free(t.pk_str);
-        }
-        var tomb_it = table.tombstones.iterator();
-        while (tomb_it.next()) |entry| {
-            tombstones[t_i] = TombstoneSnapshot{
-                .pk_str = try allocator.dupe(u8, entry.key_ptr.*),
-                .hlc = entry.value_ptr.*,
-            };
-            t_i += 1;
+
+        if (is_first_chunk) {
+            var t_i: usize = 0;
+            errdefer {
+                for (tombstones[0..t_i]) |t| allocator.free(t.pk_str);
+            }
+            var tomb_it = table.tombstones.iterator();
+            while (tomb_it.next()) |entry| {
+                tombstones[t_i] = TombstoneSnapshot{
+                    .pk_str = try allocator.dupe(u8, entry.key_ptr.*),
+                    .hlc = entry.value_ptr.*,
+                };
+                t_i += 1;
+            }
         }
 
         return TableSnapshot{
@@ -616,6 +654,43 @@ pub const Engine = struct {
             idx += 1;
         }
         return list;
+    }
+
+    pub fn insertRowBulkDirect(self: *Engine, table_name: []const u8, row: Row) !void {
+        self.mutex.lock();
+        const table = self.tables.get(table_name) orelse {
+            self.mutex.unlock();
+            return error.TableNotFound;
+        };
+        const current_hlc = self.hlc.now();
+        self.mutex.unlock();
+
+        try table.insertRowDirect(row, current_hlc);
+    }
+
+    pub fn flushTableToDisk(self: *Engine, table_name: []const u8) !void {
+        self.mutex.lock();
+        const table = self.tables.get(table_name);
+        self.mutex.unlock();
+
+        if (table) |t| {
+            const file_name = try std.fmt.allocPrint(self.allocator, "{s}/{s}.sdb", .{ self.data_dir, table_name });
+            defer self.allocator.free(file_name);
+            try t.saveToFile(file_name);
+        }
+    }
+
+    pub fn notifyTableSync(self: *Engine, table_name: []const u8) void {
+        self.mutex.lock();
+        const listener_ctx = self.listener_ctx;
+        const on_ddl = self.on_ddl;
+        self.mutex.unlock();
+
+        if (on_ddl) |cb| {
+            if (listener_ctx) |ctx| {
+                cb(ctx, table_name, false);
+            }
+        }
     }
 
     pub fn insertRow(self: *Engine, table_name: []const u8, row: Row) !void {
@@ -825,10 +900,6 @@ pub const Engine = struct {
         if (resolution == .applied_incoming) {
             // Also append to our local CDC so downstream peers get synced transitively!
             try self.cdc_log.append(record);
-            // Persist replicated mutation to disk immediately
-            const file_name = try std.fmt.allocPrint(self.allocator, "{s}/{s}.sdb", .{ self.data_dir, record.table_name });
-            defer self.allocator.free(file_name);
-            table.?.saveToFile(file_name) catch {};
         }
         return resolution;
     }

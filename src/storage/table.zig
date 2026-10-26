@@ -135,6 +135,12 @@ pub const Table = struct {
     }
 
     pub fn insertRow(self: *Table, row: Row, hlc: HLC) !void {
+        const cloned_row = try row.clone(self.allocator);
+        errdefer cloned_row.deinit(self.allocator);
+        try self.insertRowDirect(cloned_row, hlc);
+    }
+
+    pub fn insertRowDirect(self: *Table, row: Row, hlc: HLC) !void {
         self.mutex.lock();
         defer self.mutex.unlock();
 
@@ -164,9 +170,8 @@ pub const Table = struct {
                 self.allocator.free(entry.key);
             }
 
-            const cloned_row = try row.clone(self.allocator);
             const new_idx = self.rows.items.len;
-            try self.rows.append(cloned_row);
+            try self.rows.append(row);
 
             const key_for_map1 = try self.allocator.dupe(u8, pk_str);
             try self.pk_index.put(key_for_map1, new_idx);
@@ -174,9 +179,8 @@ pub const Table = struct {
             const key_for_map2 = try self.allocator.dupe(u8, pk_str);
             try self.row_hlcs.put(key_for_map2, hlc);
         } else {
-            const cloned_row = try row.clone(self.allocator);
             const new_idx = self.rows.items.len;
-            try self.rows.append(cloned_row);
+            try self.rows.append(row);
 
             var buf: [32]u8 = undefined;
             const synth_key = try std.fmt.bufPrint(&buf, "__row_{d}", .{new_idx + 1});
@@ -782,7 +786,8 @@ pub const Table = struct {
 
         const file = try std.fs.cwd().createFile(file_path, .{ .truncate = true });
         defer file.close();
-        const writer = file.writer();
+        var buf_writer = std.io.bufferedWriter(file.writer());
+        const writer = buf_writer.writer();
 
         // Magic "SDBT"
         try writer.writeAll("SDBT");
@@ -819,13 +824,16 @@ pub const Table = struct {
             try writer.writeAll(entry.key_ptr.*);
             try entry.value_ptr.*.serialize(writer);
         }
+
+        try buf_writer.flush();
     }
 
     /// Deserializes table from disk
     pub fn loadFromFile(allocator: std.mem.Allocator, file_path: []const u8) !*Table {
         const file = try std.fs.cwd().openFile(file_path, .{});
         defer file.close();
-        const reader = file.reader();
+        var buf_reader = std.io.bufferedReader(file.reader());
+        const reader = buf_reader.reader();
 
         var magic: [4]u8 = undefined;
         try reader.readNoEof(&magic);
@@ -850,12 +858,16 @@ pub const Table = struct {
         }
 
         const row_count = try reader.readInt(u32, .little);
+        try table.rows.ensureTotalCapacity(row_count);
+        try table.pk_index.ensureTotalCapacity(@intCast(row_count));
+        try table.row_hlcs.ensureTotalCapacity(@intCast(row_count));
+
         var i: usize = 0;
         while (i < row_count) : (i += 1) {
             const row = try Row.deserialize(allocator, reader);
             const hlc = try HLC.deserialize(reader);
-            try table.insertRow(row, hlc);
-            row.deinit(allocator);
+            errdefer row.deinit(allocator);
+            try table.insertRowDirect(row, hlc);
         }
 
         const tomb_count = try reader.readInt(u32, .little);

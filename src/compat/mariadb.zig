@@ -263,6 +263,15 @@ pub const MariaDbImporter = struct {
     pub fn importString(self: *MariaDbImporter, sql: []const u8) !ImportResult {
         var res = ImportResult{};
 
+        var modified_tables = std.StringHashMap(void).init(self.allocator);
+        defer {
+            var it = modified_tables.keyIterator();
+            while (it.next()) |k| {
+                self.allocator.free(k.*);
+            }
+            modified_tables.deinit();
+        }
+
         var idx: usize = 0;
         var in_single_quote = false;
         var in_double_quote = false;
@@ -324,7 +333,7 @@ pub const MariaDbImporter = struct {
                 }
                 if (c == ';') {
                     const stmt = sql[stmt_start..idx];
-                    self.processStatement(stmt, &res) catch {
+                    self.processStatement(stmt, &res, &modified_tables) catch {
                         res.errors += 1;
                     };
                     res.statements_processed += 1;
@@ -339,10 +348,17 @@ pub const MariaDbImporter = struct {
 
         if (stmt_start < sql.len) {
             const trailing = sql[stmt_start..];
-            self.processStatement(trailing, &res) catch {
+            self.processStatement(trailing, &res, &modified_tables) catch {
                 res.errors += 1;
             };
             res.statements_processed += 1;
+        }
+
+        // Flush all modified tables to disk and broadcast final chunked snapshot sync to peers
+        var tbl_it = modified_tables.keyIterator();
+        while (tbl_it.next()) |tbl_k| {
+            self.engine.flushTableToDisk(tbl_k.*) catch {};
+            self.engine.notifyTableSync(tbl_k.*);
         }
 
         return res;
@@ -406,7 +422,12 @@ pub const MariaDbImporter = struct {
         return out.toOwnedSlice();
     }
 
-    fn processStatement(self: *MariaDbImporter, raw_stmt: []const u8, res: *ImportResult) !void {
+    fn processStatement(
+        self: *MariaDbImporter,
+        raw_stmt: []const u8,
+        res: *ImportResult,
+        modified_tables: *std.StringHashMap(void),
+    ) !void {
         const clean = try stripComments(self.allocator, raw_stmt);
         defer self.allocator.free(clean);
 
@@ -445,7 +466,7 @@ pub const MariaDbImporter = struct {
             std.mem.startsWith(u8, prefix, "insert ignore into") or
             std.mem.startsWith(u8, prefix, "replace into"))
         {
-            const count = try self.handleInsert(stmt);
+            const count = try self.handleInsert(stmt, modified_tables);
             res.rows_inserted += count;
             return;
         }
@@ -612,7 +633,11 @@ pub const MariaDbImporter = struct {
         });
     }
 
-    fn handleInsert(self: *MariaDbImporter, stmt: []const u8) !usize {
+    fn handleInsert(
+        self: *MariaDbImporter,
+        stmt: []const u8,
+        modified_tables: *std.StringHashMap(void),
+    ) !usize {
         const values_kw_idx = std.ascii.indexOfIgnoreCase(stmt, "VALUES") orelse return error.InvalidInsert;
         const before_values = std.mem.trim(u8, stmt[0..values_kw_idx], " \t\r\n");
         const after_values = std.mem.trim(u8, stmt[values_kw_idx + 6 ..], " \t\r\n");
@@ -662,6 +687,11 @@ pub const MariaDbImporter = struct {
         }
 
         if (table_name.len == 0) return error.InvalidInsert;
+
+        if (!modified_tables.contains(table_name)) {
+            const dup_tbl = try self.allocator.dupe(u8, table_name);
+            try modified_tables.put(dup_tbl, {});
+        }
 
         const table = self.engine.getTable(table_name) orelse return error.TableNotFound;
 
@@ -762,20 +792,16 @@ pub const MariaDbImporter = struct {
         // Auto-increment primary key if unassigned or null
         if (schema.getPrimaryKeyIndex()) |pk_idx| {
             if (full_row.values[pk_idx] == .null_val) {
-                var max_id: i64 = 0;
-                for (table.rows.items) |existing_row| {
-                    if (existing_row.values[pk_idx] == .integer) {
-                        if (existing_row.values[pk_idx].integer > max_id) {
-                            max_id = existing_row.values[pk_idx].integer;
-                        }
-                    }
+                full_row.values[pk_idx] = Value{ .integer = table.next_auto_inc };
+                table.next_auto_inc += 1;
+            } else if (full_row.values[pk_idx] == .integer) {
+                if (full_row.values[pk_idx].integer >= table.next_auto_inc) {
+                    table.next_auto_inc = full_row.values[pk_idx].integer + 1;
                 }
-                full_row.values[pk_idx] = Value{ .integer = max_id + 1 };
             }
         }
 
-        try self.engine.insertRow(table_name, full_row);
-        full_row.deinit(self.allocator);
+        try self.engine.insertRowBulkDirect(table_name, full_row);
     }
 
     fn parseValue(self: *MariaDbImporter, raw: []const u8, target_type: DataType) !Value {

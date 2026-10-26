@@ -29,11 +29,16 @@ fn configureSocket(stream: std.net.Stream) void {
         std.posix.setsockopt(handle, std.posix.SOL.SOCKET, std.posix.SO.KEEPALIVE, std.mem.asBytes(&val)) catch {};
     }
     {
-        const timeout = std.posix.timeval{ .tv_sec = 5, .tv_usec = 0 };
+        const val: c_int = 1;
+        // IPPROTO_TCP = 6, TCP_NODELAY = 1
+        std.posix.setsockopt(handle, 6, 1, std.mem.asBytes(&val)) catch {};
+    }
+    {
+        const timeout = std.posix.timeval{ .tv_sec = 60, .tv_usec = 0 };
         std.posix.setsockopt(handle, std.posix.SOL.SOCKET, std.posix.SO.SNDTIMEO, std.mem.asBytes(&timeout)) catch {};
     }
     {
-        const timeout = std.posix.timeval{ .tv_sec = 10, .tv_usec = 0 };
+        const timeout = std.posix.timeval{ .tv_sec = 60, .tv_usec = 0 };
         std.posix.setsockopt(handle, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO, std.mem.asBytes(&timeout)) catch {};
     }
 }
@@ -187,37 +192,46 @@ pub const SyncManager = struct {
     }
 
     pub fn broadcastTableSync(self: *SyncManager, table_name: []const u8) void {
-        const snap_opt = self.engine.createTableSnapshot(table_name, self.allocator) catch return;
-        if (snap_opt == null) return;
-        var snap = snap_opt.?;
-        defer snap.deinit(self.allocator);
+        const total_rows = self.engine.getTableRowCount(table_name) orelse return;
+        const chunk_size: usize = 20000;
+        var offset: usize = 0;
 
-        var buf = std.ArrayList(u8).init(self.allocator);
-        defer buf.deinit();
-        const writer = buf.writer();
+        while (true) {
+            const snap_opt = self.engine.createTableSnapshotChunked(table_name, self.allocator, offset, chunk_size) catch break;
+            if (snap_opt == null) break;
+            var snap = snap_opt.?;
+            defer snap.deinit(self.allocator);
 
-        writer.writeInt(u32, 1, .little) catch return;
-        snap.serialize(writer) catch return;
+            var buf = std.ArrayList(u8).init(self.allocator);
+            defer buf.deinit();
+            const writer = buf.writer();
 
-        // Snapshot peers under lock, send outside lock
-        var peers_to_send = std.ArrayList(*PeerConnection).init(self.allocator);
-        defer {
-            for (peers_to_send.items) |peer| peer.unref();
-            peers_to_send.deinit();
-        }
+            writer.writeInt(u32, 1, .little) catch break;
+            snap.serialize(writer) catch break;
 
-        self.peers_mutex.lock();
-        for (self.active_peers.items) |peer| {
-            if (peer.is_alive and !peer.is_closed) {
-                peers_to_send.append(peer.ref()) catch continue;
+            // Snapshot peers under lock, send outside lock
+            var peers_to_send = std.ArrayList(*PeerConnection).init(self.allocator);
+            defer {
+                for (peers_to_send.items) |peer| peer.unref();
+                peers_to_send.deinit();
             }
-        }
-        self.peers_mutex.unlock();
 
-        for (peers_to_send.items) |peer| {
-            peer.sendFrame(.table_sync, buf.items) catch {
-                peer.close();
-            };
+            self.peers_mutex.lock();
+            for (self.active_peers.items) |peer| {
+                if (peer.is_alive and !peer.is_closed) {
+                    peers_to_send.append(peer.ref()) catch continue;
+                }
+            }
+            self.peers_mutex.unlock();
+
+            for (peers_to_send.items) |peer| {
+                peer.sendFrame(.table_sync, buf.items) catch {
+                    peer.close();
+                };
+            }
+
+            offset += snap.rows.len;
+            if (offset >= total_rows or snap.rows.len == 0) break;
         }
     }
 
@@ -500,30 +514,30 @@ pub const SyncManager = struct {
             self.allocator.free(table_names);
         }
 
-        var snapshots = std.ArrayList(protocol.TableSnapshot).init(self.allocator);
-        defer {
-            for (snapshots.items) |*s| s.deinit(self.allocator);
-            snapshots.deinit();
-        }
-
         for (table_names) |table_name| {
-            if (self.engine.createTableSnapshot(table_name, self.allocator)) |snap_opt| {
-                if (snap_opt) |snap| {
-                    try snapshots.append(snap);
-                }
-            } else |_| {}
+            const total_rows = self.engine.getTableRowCount(table_name) orelse 0;
+            const chunk_size: usize = 20000;
+            var offset: usize = 0;
+
+            while (true) {
+                const snap_opt = try self.engine.createTableSnapshotChunked(table_name, self.allocator, offset, chunk_size);
+                if (snap_opt == null) break;
+                var snap = snap_opt.?;
+                defer snap.deinit(self.allocator);
+
+                var buf = std.ArrayList(u8).init(self.allocator);
+                defer buf.deinit();
+                const writer = buf.writer();
+
+                try writer.writeInt(u32, 1, .little);
+                try snap.serialize(writer);
+
+                try peer.sendFrame(.table_sync, buf.items);
+
+                offset += snap.rows.len;
+                if (offset >= total_rows or snap.rows.len == 0) break;
+            }
         }
-
-        var buf = std.ArrayList(u8).init(self.allocator);
-        defer buf.deinit();
-        const writer = buf.writer();
-
-        try writer.writeInt(u32, @intCast(snapshots.items.len), .little);
-        for (snapshots.items) |*snap| {
-            try snap.serialize(writer);
-        }
-
-        try peer.sendFrame(.table_sync, buf.items);
     }
 
     pub fn broadcastAllTablesSync(self: *SyncManager) !void {
