@@ -537,6 +537,12 @@ pub const Engine = struct {
         }
 
         table_ptr.mutex.lock();
+        errdefer table_ptr.mutex.unlock();
+
+        // Pre-allocate capacity to avoid frequent reallocations during snapshot ingestion
+        try table_ptr.rows.ensureUnusedCapacity(snapshot.rows.len);
+        try table_ptr.pk_index.ensureUnusedCapacity(@intCast(snapshot.rows.len));
+        try table_ptr.row_hlcs.ensureUnusedCapacity(@intCast(snapshot.rows.len));
 
         // Apply rows using CRDT HLC resolution
         for (snapshot.rows) |r_snap| {
@@ -634,12 +640,14 @@ pub const Engine = struct {
         table_ptr.next_auto_inc = @max(table_ptr.next_auto_inc, snapshot.next_auto_inc);
         table_ptr.mutex.unlock();
 
-        // Persist to disk
-        const file_name = try std.fmt.allocPrint(self.allocator, "{s}/{s}.sdb", .{ self.data_dir, snapshot.name });
-        defer self.allocator.free(file_name);
-        try table_ptr.saveToFile(file_name);
+        // Persist to disk only on final chunk (or single chunk) to avoid repetitive multi-MB disk I/O chokes
+        if (snapshot.rows.len < 20000) {
+            const file_name = try std.fmt.allocPrint(self.allocator, "{s}/{s}.sdb", .{ self.data_dir, snapshot.name });
+            defer self.allocator.free(file_name);
+            try table_ptr.saveToFile(file_name);
 
-        try self.metadata.saveToFile();
+            try self.metadata.saveToFile();
+        }
     }
 
     pub fn listTables(self: *Engine, allocator: std.mem.Allocator) ![][]const u8 {

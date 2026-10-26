@@ -28,7 +28,11 @@ pub fn unquoteIdentifier(name: []const u8) []const u8 {
 }
 
 pub fn unescapeSqlString(allocator: std.mem.Allocator, raw: []const u8) ![]u8 {
-    var out = std.ArrayList(u8).init(allocator);
+    if (std.mem.indexOfScalar(u8, raw, '\\') == null and std.mem.indexOfScalar(u8, raw, '\'') == null) {
+        return try allocator.dupe(u8, raw);
+    }
+
+    var out = try std.ArrayList(u8).initCapacity(allocator, raw.len);
     errdefer out.deinit();
 
     var i: usize = 0;
@@ -744,8 +748,8 @@ pub const MariaDbImporter = struct {
         explicit_cols: ?std.ArrayList([]const u8),
         tuple_str: []const u8,
     ) !void {
-        var raw_vals = std.ArrayList([]const u8).init(self.allocator);
-        defer raw_vals.deinit();
+        var raw_vals_buf: [128][]const u8 = undefined;
+        var raw_vals_count: usize = 0;
 
         var in_sq = false;
         var in_dq = false;
@@ -763,29 +767,36 @@ pub const MariaDbImporter = struct {
             } else if (c == '"' and !in_sq) {
                 in_dq = !in_dq;
             } else if (c == ',' and !in_sq and !in_dq) {
-                try raw_vals.append(std.mem.trim(u8, tuple_str[val_start..i], " \t\r\n"));
+                if (raw_vals_count < raw_vals_buf.len) {
+                    raw_vals_buf[raw_vals_count] = std.mem.trim(u8, tuple_str[val_start..i], " \t\r\n");
+                    raw_vals_count += 1;
+                }
                 val_start = i + 1;
             }
             i += 1;
         }
         if (val_start < tuple_str.len) {
-            try raw_vals.append(std.mem.trim(u8, tuple_str[val_start..], " \t\r\n"));
+            if (raw_vals_count < raw_vals_buf.len) {
+                raw_vals_buf[raw_vals_count] = std.mem.trim(u8, tuple_str[val_start..], " \t\r\n");
+                raw_vals_count += 1;
+            }
         }
+        const raw_vals = raw_vals_buf[0..raw_vals_count];
 
         var full_row = try Row.init(self.allocator, schema.columns.len);
         errdefer full_row.deinit(self.allocator);
 
         if (explicit_cols) |cols| {
-            if (cols.items.len != raw_vals.items.len) return error.ColumnCountMismatch;
+            if (cols.items.len != raw_vals.len) return error.ColumnCountMismatch;
             for (cols.items, 0..) |col_name, c_idx| {
                 const schema_idx = schema.getColumnIndex(col_name) orelse return error.ColumnNotFound;
                 const col_type = schema.columns[schema_idx].data_type;
-                full_row.values[schema_idx] = try self.parseValue(raw_vals.items[c_idx], col_type);
+                full_row.values[schema_idx] = try self.parseValue(raw_vals[c_idx], col_type);
             }
         } else {
-            if (raw_vals.items.len != schema.columns.len) return error.ColumnCountMismatch;
+            if (raw_vals.len != schema.columns.len) return error.ColumnCountMismatch;
             for (schema.columns, 0..) |col, c_idx| {
-                full_row.values[c_idx] = try self.parseValue(raw_vals.items[c_idx], col.data_type);
+                full_row.values[c_idx] = try self.parseValue(raw_vals[c_idx], col.data_type);
             }
         }
 

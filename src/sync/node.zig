@@ -192,7 +192,7 @@ pub const SyncManager = struct {
     }
 
     pub fn broadcastTableSync(self: *SyncManager, table_name: []const u8) void {
-        const total_rows = self.engine.getTableRowCount(table_name) orelse return;
+        _ = self.engine.getTableRowCount(table_name) orelse return;
         const chunk_size: usize = 20000;
         var offset: usize = 0;
 
@@ -231,7 +231,7 @@ pub const SyncManager = struct {
             }
 
             offset += snap.rows.len;
-            if (offset >= total_rows or snap.rows.len == 0) break;
+            if (snap.rows.len < chunk_size) break;
         }
     }
 
@@ -515,7 +515,7 @@ pub const SyncManager = struct {
         }
 
         for (table_names) |table_name| {
-            const total_rows = self.engine.getTableRowCount(table_name) orelse 0;
+            _ = self.engine.getTableRowCount(table_name) orelse continue;
             const chunk_size: usize = 20000;
             var offset: usize = 0;
 
@@ -535,7 +535,7 @@ pub const SyncManager = struct {
                 try peer.sendFrame(.table_sync, buf.items);
 
                 offset += snap.rows.len;
-                if (offset >= total_rows or snap.rows.len == 0) break;
+                if (snap.rows.len < chunk_size) break;
             }
         }
     }

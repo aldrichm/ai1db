@@ -96,7 +96,7 @@ pub const Table = struct {
         }
 
         // Composite primary key: concatenate with ASCII 0x1F unit separator
-        var list = std.ArrayList(u8).init(self.allocator);
+        var list = try std.ArrayList(u8).initCapacity(self.allocator, 128);
         errdefer list.deinit();
 
         var first = true;
@@ -110,9 +110,15 @@ pub const Table = struct {
             }
             first = false;
 
-            const val_str = try self.getPrimaryKeyString(row.values[idx]);
-            defer self.allocator.free(val_str);
-            try list.appendSlice(val_str);
+            switch (row.values[idx]) {
+                .text => |s| try list.appendSlice(s),
+                .integer => |i| try list.writer().print("{d}", .{i}),
+                .timestamp => |ts| try list.writer().print("{d}", .{ts}),
+                .boolean => |b| try list.appendSlice(if (b) "true" else "false"),
+                .real => |r| try list.writer().print("{d}", .{r}),
+                .blob => |bl| try list.appendSlice(bl),
+                .null_val => try list.appendSlice("NULL"),
+            }
         }
 
         return try list.toOwnedSlice();
@@ -159,22 +165,23 @@ pub const Table = struct {
         }
 
         if (try self.getRowPrimaryKeyString(row)) |pk_str| {
-            defer self.allocator.free(pk_str);
-
             if (self.pk_index.contains(pk_str)) {
+                self.allocator.free(pk_str);
                 return error.DuplicatePrimaryKey;
             }
 
             // Remove from tombstones if it was previously deleted
-            if (self.tombstones.fetchRemove(pk_str)) |entry| {
-                self.allocator.free(entry.key);
+            if (self.tombstones.count() > 0) {
+                if (self.tombstones.fetchRemove(pk_str)) |entry| {
+                    self.allocator.free(entry.key);
+                }
             }
 
             const new_idx = self.rows.items.len;
             try self.rows.append(row);
 
-            const key_for_map1 = try self.allocator.dupe(u8, pk_str);
-            try self.pk_index.put(key_for_map1, new_idx);
+            // Transfer pk_str directly to pk_index (avoids duplicate heap allocation)
+            try self.pk_index.put(pk_str, new_idx);
 
             const key_for_map2 = try self.allocator.dupe(u8, pk_str);
             try self.row_hlcs.put(key_for_map2, hlc);
