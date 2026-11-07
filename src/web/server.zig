@@ -1752,6 +1752,228 @@ pub const WebServer = struct {
             \\      color: #fff;
             \\      border-color: #38bdf8;
             \\    }
+            \\
+            \\    /* Spreadsheet Emulator Layout & Grid Styles */
+            \\    .sheet-container {
+            \\      display: flex;
+            \\      flex-direction: column;
+            \\      gap: 10px;
+            \\      background: var(--card);
+            \\      border: 1px solid var(--card-border);
+            \\      border-radius: 8px;
+            \\      padding: 14px;
+            \\      min-height: 600px;
+            \\    }
+            \\    .sheet-toolbar {
+            \\      display: flex;
+            \\      flex-wrap: wrap;
+            \\      align-items: center;
+            \\      justify-content: space-between;
+            \\      gap: 10px;
+            \\      background: #0f172a;
+            \\      border: 1px solid #334155;
+            \\      border-radius: 6px;
+            \\      padding: 8px 12px;
+            \\    }
+            \\    .sheet-toolbar-group {
+            \\      display: flex;
+            \\      align-items: center;
+            \\      gap: 8px;
+            \\      flex-wrap: wrap;
+            \\    }
+            \\    .sheet-formula-bar {
+            \\      display: flex;
+            \\      align-items: center;
+            \\      gap: 8px;
+            \\      background: #090e1a;
+            \\      border: 1px solid #334155;
+            \\      border-radius: 6px;
+            \\      padding: 6px 12px;
+            \\    }
+            \\    .sheet-cell-addr {
+            \\      min-width: 58px;
+            \\      text-align: center;
+            \\      font-family: monospace;
+            \\      font-weight: 700;
+            \\      font-size: 13px;
+            \\      color: #38bdf8;
+            \\      background: #1e293b;
+            \\      border: 1px solid #475569;
+            \\      border-radius: 4px;
+            \\      padding: 3px 6px;
+            \\      user-select: none;
+            \\    }
+            \\    .sheet-fx-icon {
+            \\      font-style: italic;
+            \\      font-weight: 800;
+            \\      font-size: 15px;
+            \\      color: #10b981;
+            \\      user-select: none;
+            \\      padding: 0 4px;
+            \\    }
+            \\    .sheet-formula-input {
+            \\      flex: 1;
+            \\      background: transparent;
+            \\      border: none;
+            \\      outline: none;
+            \\      color: #f8fafc;
+            \\      font-family: monospace;
+            \\      font-size: 13px;
+            \\    }
+            \\    .sheet-grid-wrapper {
+            \\      position: relative;
+            \\      max-height: 520px;
+            \\      overflow: auto;
+            \\      border: 1px solid #334155;
+            \\      border-radius: 6px;
+            \\      background: #070d19;
+            \\      outline: none;
+            \\    }
+            \\    .sheet-table {
+            \\      border-collapse: separate;
+            \\      border-spacing: 0;
+            \\      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+            \\      font-size: 12px;
+            \\      color: #f1f5f9;
+            \\      width: max-content;
+            \\      min-width: 100%;
+            \\      user-select: text;
+            \\    }
+            \\    .sheet-corner-cell {
+            \\      position: sticky;
+            \\      top: 0;
+            \\      left: 0;
+            \\      z-index: 35;
+            \\      background: #1e293b;
+            \\      border-right: 1px solid #334155;
+            \\      border-bottom: 1px solid #334155;
+            \\      width: 48px;
+            \\      min-width: 48px;
+            \\      max-width: 48px;
+            \\      height: 48px;
+            \\      text-align: center;
+            \\      cursor: pointer;
+            \\    }
+            \\    .sheet-col-header {
+            \\      position: sticky;
+            \\      top: 0;
+            \\      z-index: 25;
+            \\      background: #1e293b;
+            \\      border-right: 1px solid #334155;
+            \\      border-bottom: 1px solid #334155;
+            \\      padding: 4px 8px;
+            \\      text-align: center;
+            \\      user-select: none;
+            \\    }
+            \\    .sheet-col-letter {
+            \\      font-weight: 700;
+            \\      font-size: 11px;
+            \\      color: #94a3b8;
+            \\      letter-spacing: 0.05em;
+            \\    }
+            \\    .sheet-col-name {
+            \\      font-weight: 600;
+            \\      font-size: 11px;
+            \\      color: #38bdf8;
+            \\      white-space: nowrap;
+            \\      overflow: hidden;
+            \\      text-overflow: ellipsis;
+            \\      max-width: 180px;
+            \\      display: block;
+            \\    }
+            \\    .sheet-row-header {
+            \\      position: sticky;
+            \\      left: 0;
+            \\      z-index: 20;
+            \\      background: #1e293b;
+            \\      border-right: 1px solid #334155;
+            \\      border-bottom: 1px solid #334155;
+            \\      width: 48px;
+            \\      min-width: 48px;
+            \\      max-width: 48px;
+            \\      text-align: center;
+            \\      font-size: 11px;
+            \\      font-weight: 600;
+            \\      color: #94a3b8;
+            \\      user-select: none;
+            \\      padding: 0 4px;
+            \\    }
+            \\    .sheet-data-cell {
+            \\      border-right: 1px solid #1e293b;
+            \\      border-bottom: 1px solid #1e293b;
+            \\      padding: 4px 8px;
+            \\      white-space: nowrap;
+            \\      overflow: hidden;
+            \\      text-overflow: ellipsis;
+            \\      max-width: 260px;
+            \\      min-width: 80px;
+            \\      height: 26px;
+            \\      box-sizing: border-box;
+            \\      background: #0b0f19;
+            \\      cursor: cell;
+            \\      position: relative;
+            \\    }
+            \\    .sheet-data-cell:hover {
+            \\      background: #131c2e;
+            \\    }
+            \\    .sheet-data-cell.active-cell {
+            \\      outline: 2px solid #10b981;
+            \\      outline-offset: -2px;
+            \\      background: rgba(16, 185, 129, 0.12) !important;
+            \\      z-index: 10;
+            \\    }
+            \\    .sheet-data-cell.range-selected {
+            \\      background: rgba(16, 185, 129, 0.18) !important;
+            \\    }
+            \\    .sheet-data-cell.dirty-cell {
+            \\      border-left: 3px solid #f59e0b !important;
+            \\      background: rgba(245, 158, 11, 0.08) !important;
+            \\    }
+            \\    .sheet-cell-input {
+            \\      position: absolute;
+            \\      top: 0;
+            \\      left: 0;
+            \\      width: 100%;
+            \\      height: 100%;
+            \\      background: #020617;
+            \\      border: 2px solid #10b981;
+            \\      color: #f8fafc;
+            \\      font-family: inherit;
+            \\      font-size: 12px;
+            \\      padding: 4px 8px;
+            \\      box-sizing: border-box;
+            \\      outline: none;
+            \\      z-index: 30;
+            \\    }
+            \\    .sheet-status-bar {
+            \\      display: flex;
+            \\      flex-wrap: wrap;
+            \\      justify-content: space-between;
+            \\      align-items: center;
+            \\      gap: 8px;
+            \\      padding: 6px 10px;
+            \\      background: #090e1a;
+            \\      border: 1px solid #334155;
+            \\      border-radius: 6px;
+            \\      font-size: 11px;
+            \\      color: var(--text-muted);
+            \\    }
+            \\    .sheet-stats-badges {
+            \\      display: flex;
+            \\      align-items: center;
+            \\      gap: 12px;
+            \\      flex-wrap: wrap;
+            \\    }
+            \\    .sheet-stat-pill {
+            \\      background: #1e293b;
+            \\      padding: 2px 8px;
+            \\      border-radius: 4px;
+            \\      border: 1px solid #334155;
+            \\      color: #cbd5e1;
+            \\    }
+            \\    .sheet-stat-pill strong {
+            \\      color: #38bdf8;
+            \\    }
             \\  </style>
             \\</head>
             \\<body>
@@ -2483,6 +2705,9 @@ pub const WebServer = struct {
             \\          <button id="subviewBtnApp" class="subview-btn" onclick="switchModelSubView('app')">
             \\            <span>⚡</span> Generated App UI
             \\          </button>
+            \\          <button id="subviewBtnSheet" class="subview-btn" onclick="switchModelSubView('sheet')">
+            \\            <span>📊</span> Spreadsheet Emulator
+            \\          </button>
             \\        </div>
             \\        <button class="btn-primary btn-sm btn-gradient" onclick="generateAppUiFromModel(true)">
             \\          ⚡ Generate App UI
@@ -2664,6 +2889,7 @@ pub const WebServer = struct {
             \\            <button class="btn-secondary btn-sm" onclick="exportJoinedData('csv')">📥 Export CSV</button>
             \\            <button class="btn-secondary btn-sm" onclick="exportJoinedData('json')">📥 Export JSON</button>
             \\            <button class="btn-secondary btn-sm" onclick="showModelSqlModal()">👁️ SQL Statement</button>
+            \\            <button class="btn-primary btn-sm btn-gradient" onclick="openModelInSpreadsheet()">📊 Open in Spreadsheet</button>
             \\          </div>
             \\        </div>
             \\
@@ -2672,6 +2898,71 @@ pub const WebServer = struct {
             \\            <thead id="joinedThead"></thead>
             \\            <tbody id="joinedTbody"></tbody>
             \\          </table>
+            \\        </div>
+            \\      </div>
+            \\    </div>
+            \\
+            \\    <!-- Sub-View 3: Spreadsheet Emulator (Google Sheets Compatible) -->
+            \\    <div id="modelSheetLayout" class="sheet-container" style="display: none;">
+            \\      <!-- Spreadsheet Toolbar -->
+            \\      <div class="sheet-toolbar">
+            \\        <div class="sheet-toolbar-group">
+            \\          <label class="form-label" style="margin: 0; font-size: 11px; color: #10b981; font-weight: 700;">SOURCE:</label>
+            \\          <select id="sheetSourceSelect" class="form-control" style="width: auto; min-width: 240px; font-weight: 600;" onchange="onSpreadsheetSourceChange()">
+            \\            <optgroup label="Single Tables" id="sheetOptgroupTables"></optgroup>
+            \\            <optgroup label="Data Model Views" id="sheetOptgroupModels"></optgroup>
+            \\          </select>
+            \\          <button class="btn-secondary btn-sm" onclick="reloadSpreadsheetData()" title="Reload data from database">🔄 Reload</button>
+            \\          <span style="height: 18px; width: 1px; background: #334155; margin: 0 4px;"></span>
+            \\          <button id="sheetCommitBtn" class="btn-primary btn-sm" style="background: #10b981; border-color: #059669; color: #fff; font-weight: 700; display: none;" onclick="commitSpreadsheetToDb()">💾 Commit to DB (0)</button>
+            \\          <button class="btn-secondary btn-sm" onclick="addSpreadsheetRow()" title="Add new row">➕ Add Row</button>
+            \\          <button class="btn-secondary btn-sm" onclick="deleteSpreadsheetSelectedRow()" title="Delete active row">➖ Delete Row</button>
+            \\        </div>
+            \\
+            \\        <div class="sheet-toolbar-group">
+            \\          <button class="btn-secondary btn-sm" onclick="copySpreadsheetToSheetsClipboard()" title="Copy active cells/table as TSV formatted for Google Sheets pasting">
+            \\            📋 Copy to Sheets
+            \\          </button>
+            \\          <button class="btn-secondary btn-sm" onclick="pasteSpreadsheetFromSheetsClipboard()" title="Paste TSV data directly from Google Sheets">
+            \\            📥 Paste from Sheets
+            \\          </button>
+            \\          <button class="btn-secondary btn-sm" onclick="exportSpreadsheetGoogleSheetsCsv()" title="Download CSV formatted for Google Sheets import">
+            \\            📤 Export CSV
+            \\          </button>
+            \\          <button class="btn-secondary btn-sm" onclick="showSpreadsheetSqlModal()" title="View underlying SQL query for this data">
+            \\            👁️ SQL View
+            \\          </button>
+            \\        </div>
+            \\      </div>
+            \\
+            \\      <!-- Google Sheets Style Formula Bar -->
+            \\      <div class="sheet-formula-bar">
+            \\        <div id="sheetActiveCellCoord" class="sheet-cell-addr">A1</div>
+            \\        <span class="sheet-fx-icon">fx</span>
+            \\        <input type="text" id="sheetFormulaInput" class="sheet-formula-input" placeholder="Enter value or formula (e.g. =SUM(A1:A10), =A1*1.15, =AVG(B1:B20))" oninput="onSpreadsheetFormulaInput(event)" onkeydown="onSpreadsheetFormulaKeydown(event)" />
+            \\      </div>
+            \\
+            \\      <!-- Spreadsheet Grid Table Viewport -->
+            \\      <div class="sheet-grid-wrapper" id="sheetGridWrapper" tabindex="0" onkeydown="onSpreadsheetGridKeydown(event)">
+            \\        <table class="sheet-table" id="sheetTable">
+            \\          <thead id="sheetThead"></thead>
+            \\          <tbody id="sheetTbody"></tbody>
+            \\        </table>
+            \\      </div>
+            \\
+            \\      <!-- Google Sheets Style Status Bar -->
+            \\      <div class="sheet-status-bar">
+            \\        <div style="display: flex; align-items: center; gap: 10px;">
+            \\          <span id="sheetSourceBadge" class="pill" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-weight: 600;">Single Table</span>
+            \\          <span id="sheetDimensionsBadge">0 rows &times; 0 cols</span>
+            \\          <span id="sheetDirtyBadge" style="color: #f59e0b; display: none;">● 0 unsaved edits</span>
+            \\        </div>
+            \\        <div class="sheet-stats-badges" id="sheetStatsBadges">
+            \\          <span class="sheet-stat-pill" id="sheetStatCount">Count: <strong>0</strong></span>
+            \\          <span class="sheet-stat-pill" id="sheetStatSum" style="display: none;">Sum: <strong>0</strong></span>
+            \\          <span class="sheet-stat-pill" id="sheetStatAvg" style="display: none;">Avg: <strong>0</strong></span>
+            \\          <span class="sheet-stat-pill" id="sheetStatMin" style="display: none;">Min: <strong>0</strong></span>
+            \\          <span class="sheet-stat-pill" id="sheetStatMax" style="display: none;">Max: <strong>0</strong></span>
             \\        </div>
             \\      </div>
             \\    </div>
@@ -5488,21 +5779,36 @@ pub const WebServer = struct {
             \\      modelSubView = mode;
             \\      const canvasLayout = document.getElementById('modelCanvasLayout');
             \\      const appLayout = document.getElementById('modelAppLayout');
+            \\      const sheetLayout = document.getElementById('modelSheetLayout');
             \\      const btnBuilder = document.getElementById('subviewBtnBuilder');
             \\      const btnApp = document.getElementById('subviewBtnApp');
+            \\      const btnSheet = document.getElementById('subviewBtnSheet');
+            \\
+            \\      if (btnBuilder) btnBuilder.classList.toggle('active', mode === 'builder');
+            \\      if (btnApp) btnApp.classList.toggle('active', mode === 'app');
+            \\      if (btnSheet) btnSheet.classList.toggle('active', mode === 'sheet');
+            \\
             \\      if (mode === 'builder') {
             \\        if (canvasLayout) canvasLayout.style.display = 'grid';
             \\        if (appLayout) appLayout.style.display = 'none';
-            \\        if (btnBuilder) btnBuilder.classList.add('active');
-            \\        if (btnApp) btnApp.classList.remove('active');
+            \\        if (sheetLayout) sheetLayout.style.display = 'none';
             \\        renderModelCanvas();
-            \\      } else {
+            \\      } else if (mode === 'app') {
             \\        if (canvasLayout) canvasLayout.style.display = 'none';
             \\        if (appLayout) appLayout.style.display = 'flex';
-            \\        if (btnBuilder) btnBuilder.classList.remove('active');
-            \\        if (btnApp) btnApp.classList.add('active');
+            \\        if (sheetLayout) sheetLayout.style.display = 'none';
             \\        generateAppUiFromModel(false);
+            \\      } else if (mode === 'sheet') {
+            \\        if (canvasLayout) canvasLayout.style.display = 'none';
+            \\        if (appLayout) appLayout.style.display = 'none';
+            \\        if (sheetLayout) sheetLayout.style.display = 'flex';
+            \\        initSpreadsheetView();
             \\      }
+            \\    }
+            \\
+            \\    function openModelInSpreadsheet() {
+            \\      switchModelSubView('sheet');
+            \\      setSpreadsheetSource('model:current');
             \\    }
             \\
             \\    async function initModelBuilder() {
@@ -5512,6 +5818,7 @@ pub const WebServer = struct {
             \\      await fetchModelsList();
             \\      renderModelPalette();
             \\      renderModelCanvas();
+            \\      populateSpreadsheetSources();
             \\    }
             \\
             \\    async function fetchModelsList() {
@@ -6810,6 +7117,1122 @@ pub const WebServer = struct {
             \\      } catch (err) {
             \\        alert('Network error saving record: ' + err.message);
             \\      }
+            \\    }
+            \\
+            \\    // ==========================================
+            \\    // SPREADSHEET EMULATOR LOGIC (Google Sheets Compatible)
+            \\    // ==========================================
+            \\    let sheetCurrentSource = '';
+            \\    let sheetColumns = [];
+            \\    let sheetData = [];
+            \\    let sheetRawData = [];
+            \\    let sheetFormulas = {}; // map of "r,c" => "=SUM(A1:A10)"
+            \\    let sheetActiveCell = { r: 0, c: 0 };
+            \\    let sheetSelectionRange = null; // { startR, startC, endR, endC }
+            \\    let sheetModifiedRows = new Set();
+            \\    let sheetIsEditing = false;
+            \\    let sheetIsMouseDown = false;
+            \\    let sheetDragStart = null;
+            \\
+            \\    function colIndexToLetter(idx) {
+            \\      let letter = '';
+            \\      let n = idx + 1;
+            \\      while (n > 0) {
+            \\        const rem = (n - 1) % 26;
+            \\        letter = String.fromCharCode(65 + rem) + letter;
+            \\        n = Math.floor((n - 1) / 26);
+            \\      }
+            \\      return letter;
+            \\    }
+            \\
+            \\    function letterToColIndex(letter) {
+            \\      let idx = 0;
+            \\      const str = letter.toUpperCase();
+            \\      for (let i = 0; i < str.length; i++) {
+            \\        idx = idx * 26 + (str.charCodeAt(i) - 64);
+            \\      }
+            \\      return idx - 1;
+            \\    }
+            \\
+            \\    function coordToCellId(r, c) {
+            \\      return colIndexToLetter(c) + (r + 1);
+            \\    }
+            \\
+            \\    function cellIdToCoord(cellId) {
+            \\      if (!cellId) return null;
+            \\      const match = /^([A-Za-z]+)([0-9]+)$/.exec(cellId.trim());
+            \\      if (!match) return null;
+            \\      return {
+            \\        r: parseInt(match[2], 10) - 1,
+            \\        c: letterToColIndex(match[1])
+            \\      };
+            \\    }
+            \\
+            \\    function parseSpreadsheetArgList(argStr) {
+            \\      const coords = [];
+            \\      const parts = argStr.split(',').map(s => s.trim());
+            \\      for (const part of parts) {
+            \\        if (!part) continue;
+            \\        if (part.includes(':')) {
+            \\          const [p1, p2] = part.split(':').map(s => s.trim());
+            \\          const c1 = cellIdToCoord(p1);
+            \\          const c2 = cellIdToCoord(p2);
+            \\          if (c1 && c2) {
+            \\            const minR = Math.min(c1.r, c2.r);
+            \\            const maxR = Math.max(c1.r, c2.r);
+            \\            const minC = Math.min(c1.c, c2.c);
+            \\            const maxC = Math.max(c1.c, c2.c);
+            \\            for (let r = minR; r <= maxR; r++) {
+            \\              for (let c = minC; c <= maxC; c++) {
+            \\                coords.push({ r, c });
+            \\              }
+            \\            }
+            \\          }
+            \\        } else {
+            \\          const c = cellIdToCoord(part);
+            \\          if (c) coords.push(c);
+            \\        }
+            \\      }
+            \\      return coords;
+            \\    }
+            \\
+            \\    function getSpreadsheetCellValue(r, c, visiting = new Set()) {
+            \\      if (r < 0 || c < 0 || !sheetData[r]) return '';
+            \\      const key = r + ',' + c;
+            \\      if (visiting.has(key)) return '#REF!';
+            \\      if (sheetFormulas[key]) {
+            \\        const nextVisiting = new Set(visiting);
+            \\        nextVisiting.add(key);
+            \\        return evaluateSpreadsheetFormula(sheetFormulas[key], nextVisiting);
+            \\      }
+            \\      const val = sheetData[r][c];
+            \\      return (val === null || val === undefined) ? '' : val;
+            \\    }
+            \\
+            \\    function evaluateSpreadsheetFormula(expr, visiting = new Set()) {
+            \\      if (!expr || typeof expr !== 'string' || !expr.startsWith('=')) {
+            \\        return expr;
+            \\      }
+            \\      const raw = expr.substring(1).trim();
+            \\      if (!raw) return '';
+            \\
+            \\      // Built-in functions: SUM, AVERAGE, AVG, COUNT, COUNTA, MIN, MAX
+            \\      const funcMatch = /^([A-Za-z]+)\((.*)\)$/i.exec(raw);
+            \\      if (funcMatch) {
+            \\        const fn = funcMatch[1].toUpperCase();
+            \\        const argStr = funcMatch[2].trim();
+            \\        const coords = parseSpreadsheetArgList(argStr);
+            \\        const nums = [];
+            \\        let countA = 0;
+            \\        for (const coord of coords) {
+            \\          const val = getSpreadsheetCellValue(coord.r, coord.c, visiting);
+            \\          if (val !== null && val !== undefined && val !== '') {
+            \\            countA++;
+            \\            const num = parseFloat(val);
+            \\            if (!isNaN(num)) nums.push(num);
+            \\          }
+            \\        }
+            \\
+            \\        if (fn === 'SUM') {
+            \\          return nums.reduce((a, b) => a + b, 0);
+            \\        } else if (fn === 'AVERAGE' || fn === 'AVG') {
+            \\          return nums.length ? (nums.reduce((a, b) => a + b, 0) / nums.length) : 0;
+            \\        } else if (fn === 'COUNT') {
+            \\          return nums.length;
+            \\        } else if (fn === 'COUNTA') {
+            \\          return countA;
+            \\        } else if (fn === 'MIN') {
+            \\          return nums.length ? Math.min(...nums) : 0;
+            \\        } else if (fn === 'MAX') {
+            \\          return nums.length ? Math.max(...nums) : 0;
+            \\        }
+            \\      }
+            \\
+            \\      // Arithmetic expressions with cell references (e.g. =A1+B1, =A1*1.15)
+            \\      try {
+            \\        let sanitized = raw.replace(/\b([A-Za-z]+[0-9]+)\b/g, (m) => {
+            \\          const coord = cellIdToCoord(m);
+            \\          if (!coord) return '0';
+            \\          const val = getSpreadsheetCellValue(coord.r, coord.c, visiting);
+            \\          const num = parseFloat(val);
+            \\          return isNaN(num) ? '0' : String(num);
+            \\        });
+            \\        if (/^[0-9+\-*/().% \t]+$/.test(sanitized)) {
+            \\          const res = Function('"use strict"; return (' + sanitized + ')')();
+            \\          return (typeof res === 'number' && !isNaN(res)) ? (Number.isInteger(res) ? res : Number(res.toFixed(4))) : res;
+            \\        }
+            \\      } catch (err) {
+            \\        return '#VALUE!';
+            \\      }
+            \\      return '#ERROR!';
+            \\    }
+            \\
+            \\    async function initSpreadsheetView() {
+            \\      populateSpreadsheetSources();
+            \\      if (!sheetCurrentSource) {
+            \\        const sel = document.getElementById('sheetSourceSelect');
+            \\        if (sel && sel.value) {
+            \\          await loadSpreadsheetSource(sel.value);
+            \\        }
+            \\      }
+            \\    }
+            \\
+            \\    function populateSpreadsheetSources() {
+            \\      const optTables = document.getElementById('sheetOptgroupTables');
+            \\      const optModels = document.getElementById('sheetOptgroupModels');
+            \\      const sel = document.getElementById('sheetSourceSelect');
+            \\      if (!optTables || !optModels || !sel) return;
+            \\
+            \\      const previousVal = sel.value || sheetCurrentSource;
+            \\
+            \\      // Populate Single Tables
+            \\      let tablesHtml = '';
+            \\      if (knownTables && knownTables.length > 0) {
+            \\        knownTables.forEach(t => {
+            \\          tablesHtml += `<option value="table:${escapeHtml(t.name)}">${escapeHtml(t.name)} (${(t.columns || []).length} cols)</option>`;
+            \\        });
+            \\      } else {
+            \\        tablesHtml = '<option value="" disabled>No database tables found</option>';
+            \\      }
+            \\      optTables.innerHTML = tablesHtml;
+            \\
+            \\      // Populate Data Model Views
+            \\      let modelsHtml = '';
+            \\      const curModelName = currentModel.name ? escapeHtml(currentModel.name) : 'Active Model';
+            \\      const curTableCount = (currentModel.tables || []).length;
+            \\      modelsHtml += `<option value="model:current">Current Model: ${curModelName} (${curTableCount} joined tables)</option>`;
+            \\
+            \\      if (savedModelsList && savedModelsList.length > 0) {
+            \\        savedModelsList.forEach(m => {
+            \\          const count = (m.tables || []).length;
+            \\          modelsHtml += `<option value="model:${escapeHtml(m.name)}">Saved Model: ${escapeHtml(m.name)} (${count} tables)</option>`;
+            \\        });
+            \\      }
+            \\      optModels.innerHTML = modelsHtml;
+            \\
+            \\      if (previousVal && Array.from(sel.options).some(o => o.value === previousVal)) {
+            \\        sel.value = previousVal;
+            \\      } else if (sel.options.length > 0) {
+            \\        sel.value = sel.options[0].value;
+            \\      }
+            \\    }
+            \\
+            \\    async function setSpreadsheetSource(sourceKey) {
+            \\      const sel = document.getElementById('sheetSourceSelect');
+            \\      if (sel) {
+            \\        populateSpreadsheetSources();
+            \\        sel.value = sourceKey;
+            \\      }
+            \\      await loadSpreadsheetSource(sourceKey);
+            \\    }
+            \\
+            \\    async function onSpreadsheetSourceChange() {
+            \\      const sel = document.getElementById('sheetSourceSelect');
+            \\      if (!sel) return;
+            \\      if (sheetModifiedRows.size > 0) {
+            \\        if (!confirm('You have ' + sheetModifiedRows.size + ' unsaved change(s). Discard and switch data source?')) {
+            \\          sel.value = sheetCurrentSource;
+            \\          return;
+            \\        }
+            \\      }
+            \\      await loadSpreadsheetSource(sel.value);
+            \\    }
+            \\
+            \\    async function reloadSpreadsheetData() {
+            \\      if (sheetCurrentSource) {
+            \\        await loadSpreadsheetSource(sheetCurrentSource);
+            \\        showModelAlert('success', 'Spreadsheet data reloaded.');
+            \\      }
+            \\    }
+            \\
+            \\    async function loadSpreadsheetSource(sourceKey) {
+            \\      sheetCurrentSource = sourceKey;
+            \\      sheetFormulas = {};
+            \\      sheetModifiedRows.clear();
+            \\      sheetActiveCell = { r: 0, c: 0 };
+            \\      sheetSelectionRange = null;
+            \\
+            \\      const badge = document.getElementById('sheetSourceBadge');
+            \\
+            \\      if (sourceKey.startsWith('table:')) {
+            \\        const tableName = sourceKey.substring(6);
+            \\        if (badge) badge.innerText = 'Single Table: ' + tableName;
+            \\        try {
+            \\          const res = await fetch('/api/query', {
+            \\            method: 'POST',
+            \\            headers: { 'Content-Type': 'application/json' },
+            \\            body: JSON.stringify({ query: 'SELECT * FROM ' + tableName + ' LIMIT 500;' })
+            \\          });
+            \\          const data = await res.json();
+            \\          sheetColumns = data.columns || [];
+            \\          sheetData = data.rows || [];
+            \\          sheetRawData = JSON.parse(JSON.stringify(sheetData));
+            \\        } catch (err) {
+            \\          console.error('Failed to load table in spreadsheet:', err);
+            \\          showModelAlert('error', 'Failed to load table: ' + err.message);
+            \\        }
+            \\      } else if (sourceKey.startsWith('model:')) {
+            \\        const modelName = sourceKey.substring(6);
+            \\        if (badge) badge.innerText = 'Data Model View: ' + (modelName === 'current' ? (currentModel.name || 'Current Model') : modelName);
+            \\        let query = '';
+            \\        if (modelName === 'current') {
+            \\          query = generatedModelSql || buildModelSqlStatement();
+            \\        } else {
+            \\          const m = (savedModelsList || []).find(item => item.name === modelName);
+            \\          if (m) {
+            \\            query = buildCustomModelSqlStatement(m);
+            \\          }
+            \\        }
+            \\        if (!query) {
+            \\          sheetColumns = ['Notice'];
+            \\          sheetData = [['No tables connected in model to generate view.']];
+            \\          sheetRawData = JSON.parse(JSON.stringify(sheetData));
+            \\        } else {
+            \\          try {
+            \\            const res = await fetch('/api/query', {
+            \\              method: 'POST',
+            \\              headers: { 'Content-Type': 'application/json' },
+            \\              body: JSON.stringify({ query: query })
+            \\            });
+            \\            const data = await res.json();
+            \\            sheetColumns = data.columns || [];
+            \\            sheetData = data.rows || [];
+            \\            sheetRawData = JSON.parse(JSON.stringify(sheetData));
+            \\          } catch (err) {
+            \\            console.error('Failed to load model in spreadsheet:', err);
+            \\            showModelAlert('error', 'Failed to load model query: ' + err.message);
+            \\          }
+            \\        }
+            \\      }
+            \\
+            \\      renderSpreadsheetGrid();
+            \\      updateSpreadsheetActiveCellDisplay();
+            \\      updateSpreadsheetCommitButton();
+            \\      updateSpreadsheetStatusBar();
+            \\    }
+            \\
+            \\    function buildCustomModelSqlStatement(m) {
+            \\      if (!m || !m.tables || m.tables.length === 0) return '';
+            \\      const master = m.masterTable || m.tables[0];
+            \\      const joinedTables = [master];
+            \\      const joinClauses = [];
+            \\
+            \\      (m.links || []).forEach(link => {
+            \\        const fromT = link.fromTable;
+            \\        const toT = link.toTable;
+            \\        if (fromT === master && !joinedTables.includes(toT)) {
+            \\          joinClauses.push('LEFT JOIN ' + toT + ' ON ' + master + '.' + link.fromCol + ' = ' + toT + '.' + link.toCol);
+            \\          joinedTables.push(toT);
+            \\        } else if (toT === master && !joinedTables.includes(fromT)) {
+            \\          joinClauses.push('LEFT JOIN ' + fromT + ' ON ' + master + '.' + link.toCol + ' = ' + fromT + '.' + link.fromCol);
+            \\          joinedTables.push(fromT);
+            \\        }
+            \\      });
+            \\
+            \\      const cols = [];
+            \\      joinedTables.forEach(tblName => {
+            \\        const tInfo = (knownTables || []).find(k => k.name.toLowerCase() === tblName.toLowerCase());
+            \\        if (tInfo && tInfo.columns) {
+            \\          tInfo.columns.forEach(col => {
+            \\            cols.push(tblName + '.' + col.name + ' AS ' + tblName + '_' + col.name);
+            \\          });
+            \\        }
+            \\      });
+            \\
+            \\      const selectCols = (cols.length > 0) ? cols.join(', ') : '*';
+            \\      return 'SELECT ' + selectCols + ' FROM ' + master + ' ' + joinClauses.join(' ') + ' LIMIT 500;';
+            \\    }
+            \\
+            \\    function renderSpreadsheetGrid() {
+            \\      const thead = document.getElementById('sheetThead');
+            \\      const tbody = document.getElementById('sheetTbody');
+            \\      if (!thead || !tbody) return;
+            \\
+            \\      // Header row
+            \\      let thHtml = '<tr><th class="sheet-corner-cell" onclick="selectSpreadsheetAll()">⬚</th>';
+            \\      sheetColumns.forEach((col, cIdx) => {
+            \\        const letter = colIndexToLetter(cIdx);
+            \\        thHtml += `<th class="sheet-col-header" onclick="selectSpreadsheetCol(${cIdx})">
+            \\          <div class="sheet-col-letter">${letter}</div>
+            \\          <div class="sheet-col-name" title="${escapeHtml(col)}">${escapeHtml(col)}</div>
+            \\        </th>`;
+            \\      });
+            \\      thHtml += '</tr>';
+            \\      thead.innerHTML = thHtml;
+            \\
+            \\      // Body rows
+            \\      let tbHtml = '';
+            \\      sheetData.forEach((row, rIdx) => {
+            \\        tbHtml += `<tr><th class="sheet-row-header" onclick="selectSpreadsheetRow(${rIdx})">${rIdx + 1}</th>`;
+            \\        sheetColumns.forEach((_, cIdx) => {
+            \\          const isActive = (sheetActiveCell.r === rIdx && sheetActiveCell.c === cIdx);
+            \\          const inRange = isSpreadsheetCellInRange(rIdx, cIdx);
+            \\          const isDirty = sheetModifiedRows.has(rIdx);
+            \\          const classes = ['sheet-data-cell'];
+            \\          if (isActive) classes.push('active-cell');
+            \\          if (inRange) classes.push('range-selected');
+            \\          if (isDirty) classes.push('dirty-cell');
+            \\
+            \\          const displayVal = getSpreadsheetCellValue(rIdx, cIdx);
+            \\          const formatted = (displayVal === null || displayVal === undefined) ? '' : escapeHtml(String(displayVal));
+            \\          const isNum = (typeof displayVal === 'number' || (!isNaN(parseFloat(displayVal)) && isFinite(displayVal) && typeof displayVal !== 'string'));
+            \\          const alignStyle = isNum ? 'text-align: right;' : '';
+            \\
+            \\          tbHtml += `<td id="sheetCell_${rIdx}_${cIdx}" class="${classes.join(' ')}" style="${alignStyle}" data-r="${rIdx}" data-c="${cIdx}" onclick="onSpreadsheetCellClick(event, ${rIdx}, ${cIdx})" ondblclick="onSpreadsheetCellDblClick(event, ${rIdx}, ${cIdx})" onmousedown="onSpreadsheetCellMouseDown(event, ${rIdx}, ${cIdx})" onmouseenter="onSpreadsheetCellMouseEnter(event, ${rIdx}, ${cIdx})">${formatted}</td>`;
+            \\        });
+            \\        tbHtml += '</tr>';
+            \\      });
+            \\      tbody.innerHTML = tbHtml;
+            \\    }
+            \\
+            \\    function isSpreadsheetCellInRange(r, c) {
+            \\      if (!sheetSelectionRange) return false;
+            \\      const minR = Math.min(sheetSelectionRange.startR, sheetSelectionRange.endR);
+            \\      const maxR = Math.max(sheetSelectionRange.startR, sheetSelectionRange.endR);
+            \\      const minC = Math.min(sheetSelectionRange.startC, sheetSelectionRange.endC);
+            \\      const maxC = Math.max(sheetSelectionRange.startC, sheetSelectionRange.endC);
+            \\      return (r >= minR && r <= maxR && c >= minC && c <= maxC);
+            \\    }
+            \\
+            \\    function onSpreadsheetCellClick(e, r, c) {
+            \\      if (sheetIsEditing) commitSpreadsheetCellInlineEdit();
+            \\      if (e.shiftKey) {
+            \\        sheetSelectionRange = {
+            \\          startR: sheetActiveCell.r,
+            \\          startC: sheetActiveCell.c,
+            \\          endR: r,
+            \\          endC: c
+            \\        };
+            \\      } else {
+            \\        sheetActiveCell = { r, c };
+            \\        sheetSelectionRange = null;
+            \\      }
+            \\      updateSpreadsheetSelectionUI();
+            \\      updateSpreadsheetActiveCellDisplay();
+            \\      updateSpreadsheetStatusBar();
+            \\    }
+            \\
+            \\    function onSpreadsheetCellMouseDown(e, r, c) {
+            \\      if (e.button !== 0) return;
+            \\      sheetIsMouseDown = true;
+            \\      sheetDragStart = { r, c };
+            \\      if (!e.shiftKey) {
+            \\        sheetActiveCell = { r, c };
+            \\        sheetSelectionRange = null;
+            \\      }
+            \\    }
+            \\
+            \\    function onSpreadsheetCellMouseEnter(e, r, c) {
+            \\      if (sheetIsMouseDown && sheetDragStart) {
+            \\        sheetSelectionRange = {
+            \\          startR: sheetDragStart.r,
+            \\          startC: sheetDragStart.c,
+            \\          endR: r,
+            \\          endC: c
+            \\        };
+            \\        updateSpreadsheetSelectionUI();
+            \\        updateSpreadsheetStatusBar();
+            \\      }
+            \\    }
+            \\
+            \\    document.addEventListener('mouseup', () => {
+            \\      sheetIsMouseDown = false;
+            \\    });
+            \\
+            \\    function selectSpreadsheetRow(rIdx) {
+            \\      sheetActiveCell = { r: rIdx, c: 0 };
+            \\      sheetSelectionRange = {
+            \\        startR: rIdx,
+            \\        startC: 0,
+            \\        endR: rIdx,
+            \\        endC: Math.max(0, sheetColumns.length - 1)
+            \\      };
+            \\      updateSpreadsheetSelectionUI();
+            \\      updateSpreadsheetActiveCellDisplay();
+            \\      updateSpreadsheetStatusBar();
+            \\    }
+            \\
+            \\    function selectSpreadsheetCol(cIdx) {
+            \\      sheetActiveCell = { r: 0, c: cIdx };
+            \\      sheetSelectionRange = {
+            \\        startR: 0,
+            \\        startC: cIdx,
+            \\        endR: Math.max(0, sheetData.length - 1),
+            \\        endC: cIdx
+            \\      };
+            \\      updateSpreadsheetSelectionUI();
+            \\      updateSpreadsheetActiveCellDisplay();
+            \\      updateSpreadsheetStatusBar();
+            \\    }
+            \\
+            \\    function selectSpreadsheetAll() {
+            \\      if (sheetData.length === 0 || sheetColumns.length === 0) return;
+            \\      sheetActiveCell = { r: 0, c: 0 };
+            \\      sheetSelectionRange = {
+            \\        startR: 0,
+            \\        startC: 0,
+            \\        endR: sheetData.length - 1,
+            \\        endC: sheetColumns.length - 1
+            \\      };
+            \\      updateSpreadsheetSelectionUI();
+            \\      updateSpreadsheetActiveCellDisplay();
+            \\      updateSpreadsheetStatusBar();
+            \\    }
+            \\
+            \\    function updateSpreadsheetSelectionUI() {
+            \\      const tbody = document.getElementById('sheetTbody');
+            \\      if (!tbody) return;
+            \\      const allCells = tbody.querySelectorAll('.sheet-data-cell');
+            \\      allCells.forEach(cell => {
+            \\        const r = parseInt(cell.getAttribute('data-r'), 10);
+            \\        const c = parseInt(cell.getAttribute('data-c'), 10);
+            \\        const isActive = (sheetActiveCell.r === r && sheetActiveCell.c === c);
+            \\        const inRange = isSpreadsheetCellInRange(r, c);
+            \\        cell.classList.toggle('active-cell', isActive);
+            \\        cell.classList.toggle('range-selected', inRange);
+            \\      });
+            \\    }
+            \\
+            \\    function updateSpreadsheetActiveCellDisplay() {
+            \\      const coordEl = document.getElementById('sheetActiveCellCoord');
+            \\      const inputEl = document.getElementById('sheetFormulaInput');
+            \\      if (!coordEl || !inputEl) return;
+            \\
+            \\      const r = sheetActiveCell.r;
+            \\      const c = sheetActiveCell.c;
+            \\      coordEl.innerText = coordToCellId(r, c);
+            \\
+            \\      const formulaKey = r + ',' + c;
+            \\      if (sheetFormulas[formulaKey]) {
+            \\        inputEl.value = sheetFormulas[formulaKey];
+            \\      } else if (sheetData[r] && sheetData[r][c] !== undefined && sheetData[r][c] !== null) {
+            \\        inputEl.value = sheetData[r][c];
+            \\      } else {
+            \\        inputEl.value = '';
+            \\      }
+            \\    }
+            \\
+            \\    function onSpreadsheetFormulaInput(e) {
+            \\      const val = e.target.value;
+            \\      const r = sheetActiveCell.r;
+            \\      const c = sheetActiveCell.c;
+            \\      if (!sheetData[r]) return;
+            \\
+            \\      const key = r + ',' + c;
+            \\      if (val.startsWith('=')) {
+            \\        sheetFormulas[key] = val;
+            \\      } else {
+            \\        delete sheetFormulas[key];
+            \\        sheetData[r][c] = (/^-?\d+(\.\d+)?$/.test(val.trim())) ? Number(val.trim()) : val;
+            \\      }
+            \\      sheetModifiedRows.add(r);
+            \\      updateSpreadsheetCommitButton();
+            \\
+            \\      const cell = document.getElementById(`sheetCell_${r}_${c}`);
+            \\      if (cell) {
+            \\        cell.classList.add('dirty-cell');
+            \\        const computed = getSpreadsheetCellValue(r, c);
+            \\        cell.innerText = (computed === null || computed === undefined) ? '' : computed;
+            \\      }
+            \\    }
+            \\
+            \\    function onSpreadsheetFormulaKeydown(e) {
+            \\      if (e.key === 'Enter') {
+            \\        e.preventDefault();
+            \\        if (sheetActiveCell.r + 1 < sheetData.length) {
+            \\          sheetActiveCell.r++;
+            \\          sheetSelectionRange = null;
+            \\          updateSpreadsheetSelectionUI();
+            \\          updateSpreadsheetActiveCellDisplay();
+            \\          updateSpreadsheetStatusBar();
+            \\        }
+            \\      } else if (e.key === 'Tab') {
+            \\        e.preventDefault();
+            \\        if (sheetActiveCell.c + 1 < sheetColumns.length) {
+            \\          sheetActiveCell.c++;
+            \\          sheetSelectionRange = null;
+            \\          updateSpreadsheetSelectionUI();
+            \\          updateSpreadsheetActiveCellDisplay();
+            \\          updateSpreadsheetStatusBar();
+            \\        }
+            \\      }
+            \\    }
+            \\
+            \\    function onSpreadsheetCellDblClick(e, r, c) {
+            \\      startSpreadsheetCellInlineEdit(r, c);
+            \\    }
+            \\
+            \\    function startSpreadsheetCellInlineEdit(r, c) {
+            \\      sheetIsEditing = true;
+            \\      const cell = document.getElementById(`sheetCell_${r}_${c}`);
+            \\      if (!cell) return;
+            \\
+            \\      const formulaKey = r + ',' + c;
+            \\      const curVal = sheetFormulas[formulaKey] || (sheetData[r] ? sheetData[r][c] : '') || '';
+            \\
+            \\      const input = document.createElement('input');
+            \\      input.className = 'sheet-cell-input';
+            \\      input.type = 'text';
+            \\      input.value = curVal;
+            \\      cell.innerHTML = '';
+            \\      cell.appendChild(input);
+            \\      input.focus();
+            \\      input.select();
+            \\
+            \\      input.onkeydown = (e) => {
+            \\        if (e.key === 'Enter') {
+            \\          e.preventDefault();
+            \\          commitSpreadsheetCellInlineEdit(input.value, r, c);
+            \\          if (r + 1 < sheetData.length) sheetActiveCell.r = r + 1;
+            \\          updateSpreadsheetSelectionUI();
+            \\          updateSpreadsheetActiveCellDisplay();
+            \\          updateSpreadsheetStatusBar();
+            \\        } else if (e.key === 'Tab') {
+            \\          e.preventDefault();
+            \\          commitSpreadsheetCellInlineEdit(input.value, r, c);
+            \\          if (c + 1 < sheetColumns.length) sheetActiveCell.c = c + 1;
+            \\          updateSpreadsheetSelectionUI();
+            \\          updateSpreadsheetActiveCellDisplay();
+            \\          updateSpreadsheetStatusBar();
+            \\        } else if (e.key === 'Escape') {
+            \\          e.preventDefault();
+            \\          cancelSpreadsheetCellInlineEdit(r, c);
+            \\        }
+            \\      };
+            \\
+            \\      input.onblur = () => {
+            \\        if (sheetIsEditing) {
+            \\          commitSpreadsheetCellInlineEdit(input.value, r, c);
+            \\        }
+            \\      };
+            \\    }
+            \\
+            \\    function commitSpreadsheetCellInlineEdit(val, r, c) {
+            \\      sheetIsEditing = false;
+            \\      if (val === undefined) {
+            \\        const input = document.querySelector('.sheet-cell-input');
+            \\        if (input) val = input.value;
+            \\        else return;
+            \\        r = sheetActiveCell.r;
+            \\        c = sheetActiveCell.c;
+            \\      }
+            \\      if (!sheetData[r]) return;
+            \\
+            \\      const key = r + ',' + c;
+            \\      const trimmed = (typeof val === 'string') ? val.trim() : String(val);
+            \\      if (trimmed.startsWith('=')) {
+            \\        sheetFormulas[key] = trimmed;
+            \\      } else {
+            \\        delete sheetFormulas[key];
+            \\        sheetData[r][c] = (/^-?\d+(\.\d+)?$/.test(trimmed)) ? Number(trimmed) : val;
+            \\      }
+            \\      sheetModifiedRows.add(r);
+            \\      renderSpreadsheetGrid();
+            \\      updateSpreadsheetCommitButton();
+            \\      updateSpreadsheetActiveCellDisplay();
+            \\      updateSpreadsheetStatusBar();
+            \\    }
+            \\
+            \\    function cancelSpreadsheetCellInlineEdit(r, c) {
+            \\      sheetIsEditing = false;
+            \\      renderSpreadsheetGrid();
+            \\      updateSpreadsheetActiveCellDisplay();
+            \\    }
+            \\
+            \\    function onSpreadsheetGridKeydown(e) {
+            \\      if (sheetIsEditing) return;
+            \\
+            \\      const r = sheetActiveCell.r;
+            \\      const c = sheetActiveCell.c;
+            \\
+            \\      if (e.key === 'ArrowDown') {
+            \\        e.preventDefault();
+            \\        if (r + 1 < sheetData.length) {
+            \\          sheetActiveCell.r++;
+            \\          if (!e.shiftKey) sheetSelectionRange = null;
+            \\          else {
+            \\            if (!sheetSelectionRange) sheetSelectionRange = { startR: r, startC: c, endR: r + 1, endC: c };
+            \\            else sheetSelectionRange.endR = sheetActiveCell.r;
+            \\          }
+            \\          updateSpreadsheetSelectionUI();
+            \\          updateSpreadsheetActiveCellDisplay();
+            \\          updateSpreadsheetStatusBar();
+            \\        }
+            \\      } else if (e.key === 'ArrowUp') {
+            \\        e.preventDefault();
+            \\        if (r > 0) {
+            \\          sheetActiveCell.r--;
+            \\          if (!e.shiftKey) sheetSelectionRange = null;
+            \\          else {
+            \\            if (!sheetSelectionRange) sheetSelectionRange = { startR: r, startC: c, endR: r - 1, endC: c };
+            \\            else sheetSelectionRange.endR = sheetActiveCell.r;
+            \\          }
+            \\          updateSpreadsheetSelectionUI();
+            \\          updateSpreadsheetActiveCellDisplay();
+            \\          updateSpreadsheetStatusBar();
+            \\        }
+            \\      } else if (e.key === 'ArrowRight') {
+            \\        e.preventDefault();
+            \\        if (c + 1 < sheetColumns.length) {
+            \\          sheetActiveCell.c++;
+            \\          if (!e.shiftKey) sheetSelectionRange = null;
+            \\          else {
+            \\            if (!sheetSelectionRange) sheetSelectionRange = { startR: r, startC: c, endR: r, endC: c + 1 };
+            \\            else sheetSelectionRange.endC = sheetActiveCell.c;
+            \\          }
+            \\          updateSpreadsheetSelectionUI();
+            \\          updateSpreadsheetActiveCellDisplay();
+            \\          updateSpreadsheetStatusBar();
+            \\        }
+            \\      } else if (e.key === 'ArrowLeft') {
+            \\        e.preventDefault();
+            \\        if (c > 0) {
+            \\          sheetActiveCell.c--;
+            \\          if (!e.shiftKey) sheetSelectionRange = null;
+            \\          else {
+            \\            if (!sheetSelectionRange) sheetSelectionRange = { startR: r, startC: c, endR: r, endC: c - 1 };
+            \\            else sheetSelectionRange.endC = sheetActiveCell.c;
+            \\          }
+            \\          updateSpreadsheetSelectionUI();
+            \\          updateSpreadsheetActiveCellDisplay();
+            \\          updateSpreadsheetStatusBar();
+            \\        }
+            \\      } else if (e.key === 'Enter') {
+            \\        e.preventDefault();
+            \\        startSpreadsheetCellInlineEdit(r, c);
+            \\      } else if (e.key === 'Tab') {
+            \\        e.preventDefault();
+            \\        if (e.shiftKey) {
+            \\          if (c > 0) sheetActiveCell.c--;
+            \\        } else {
+            \\          if (c + 1 < sheetColumns.length) sheetActiveCell.c++;
+            \\        }
+            \\        sheetSelectionRange = null;
+            \\        updateSpreadsheetSelectionUI();
+            \\        updateSpreadsheetActiveCellDisplay();
+            \\        updateSpreadsheetStatusBar();
+            \\      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+            \\        e.preventDefault();
+            \\        clearSpreadsheetSelectedCells();
+            \\      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+            \\        e.preventDefault();
+            \\        copySpreadsheetToSheetsClipboard();
+            \\      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+            \\        e.preventDefault();
+            \\        pasteSpreadsheetFromSheetsClipboard();
+            \\      } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            \\        startSpreadsheetCellInlineEdit(r, c);
+            \\        const input = document.querySelector('.sheet-cell-input');
+            \\        if (input) input.value = e.key;
+            \\      }
+            \\    }
+            \\
+            \\    function clearSpreadsheetSelectedCells() {
+            \\      let minR = sheetActiveCell.r, maxR = sheetActiveCell.r;
+            \\      let minC = sheetActiveCell.c, maxC = sheetActiveCell.c;
+            \\      if (sheetSelectionRange) {
+            \\        minR = Math.min(sheetSelectionRange.startR, sheetSelectionRange.endR);
+            \\        maxR = Math.max(sheetSelectionRange.startR, sheetSelectionRange.endR);
+            \\        minC = Math.min(sheetSelectionRange.startC, sheetSelectionRange.endC);
+            \\        maxC = Math.max(sheetSelectionRange.startC, sheetSelectionRange.endC);
+            \\      }
+            \\      for (let r = minR; r <= maxR; r++) {
+            \\        if (!sheetData[r]) continue;
+            \\        for (let c = minC; c <= maxC; c++) {
+            \\          delete sheetFormulas[r + ',' + c];
+            \\          sheetData[r][c] = null;
+            \\        }
+            \\        sheetModifiedRows.add(r);
+            \\      }
+            \\      renderSpreadsheetGrid();
+            \\      updateSpreadsheetCommitButton();
+            \\      updateSpreadsheetStatusBar();
+            \\    }
+            \\
+            \\    async function copySpreadsheetToSheetsClipboard() {
+            \\      let startR = 0, endR = Math.max(0, sheetData.length - 1);
+            \\      let startC = 0, endC = Math.max(0, sheetColumns.length - 1);
+            \\
+            \\      if (sheetSelectionRange) {
+            \\        startR = Math.min(sheetSelectionRange.startR, sheetSelectionRange.endR);
+            \\        endR = Math.max(sheetSelectionRange.startR, sheetSelectionRange.endR);
+            \\        startC = Math.min(sheetSelectionRange.startC, sheetSelectionRange.endC);
+            \\        endC = Math.max(sheetSelectionRange.startC, sheetSelectionRange.endC);
+            \\      } else if (sheetActiveCell) {
+            \\        startR = sheetActiveCell.r;
+            \\        endR = sheetActiveCell.r;
+            \\        startC = sheetActiveCell.c;
+            \\        endC = sheetActiveCell.c;
+            \\      }
+            \\
+            \\      const lines = [];
+            \\      for (let r = startR; r <= endR; r++) {
+            \\        if (!sheetData[r]) continue;
+            \\        const rowVals = [];
+            \\        for (let c = startC; c <= endC; c++) {
+            \\          let val = getSpreadsheetCellValue(r, c);
+            \\          if (val === null || val === undefined) val = '';
+            \\          rowVals.push(String(val).replace(/\t/g, ' '));
+            \\        }
+            \\        lines.push(rowVals.join('\t'));
+            \\      }
+            \\      const tsv = lines.join('\r\n');
+            \\
+            \\      try {
+            \\        await navigator.clipboard.writeText(tsv);
+            \\        const rowCount = (endR - startR + 1);
+            \\        const colCount = (endC - startC + 1);
+            \\        showModelAlert('success', `📋 Copied ${rowCount} row(s) × ${colCount} col(s) in Google Sheets TSV format! Ready for Cmd+V in Google Sheets.`);
+            \\      } catch (err) {
+            \\        console.error('Clipboard copy error:', err);
+            \\        showModelAlert('error', 'Clipboard error: ' + err.message);
+            \\      }
+            \\    }
+            \\
+            \\    async function pasteSpreadsheetFromSheetsClipboard() {
+            \\      try {
+            \\        const text = await navigator.clipboard.readText();
+            \\        if (!text) {
+            \\          showModelAlert('error', 'Clipboard is empty.');
+            \\          return;
+            \\        }
+            \\        applySpreadsheetTsvPaste(text);
+            \\      } catch (err) {
+            \\        console.error('Clipboard paste error:', err);
+            \\        showModelAlert('error', 'Clipboard error: ' + err.message);
+            \\      }
+            \\    }
+            \\
+            \\    function applySpreadsheetTsvPaste(text) {
+            \\      const rawLines = text.split(/\r\n|\r|\n/);
+            \\      if (rawLines.length > 0 && rawLines[rawLines.length - 1] === '') {
+            \\        rawLines.pop();
+            \\      }
+            \\      if (rawLines.length === 0) return;
+            \\
+            \\      const targetR = sheetActiveCell ? sheetActiveCell.r : 0;
+            \\      const targetC = sheetActiveCell ? sheetActiveCell.c : 0;
+            \\
+            \\      let rowsPasted = 0;
+            \\      let maxColsPasted = 0;
+            \\
+            \\      rawLines.forEach((line, rOffset) => {
+            \\        const r = targetR + rOffset;
+            \\        const cells = line.includes('\t') ? line.split('\t') : line.split(',');
+            \\        maxColsPasted = Math.max(maxColsPasted, cells.length);
+            \\
+            \\        while (sheetData.length <= r) {
+            \\          const newRow = new Array(sheetColumns.length).fill(null);
+            \\          sheetData.push(newRow);
+            \\        }
+            \\
+            \\        cells.forEach((cellVal, cOffset) => {
+            \\          const c = targetC + cOffset;
+            \\          while (sheetColumns.length <= c) {
+            \\            sheetColumns.push('Col_' + colIndexToLetter(sheetColumns.length));
+            \\            for (let rowIdx = 0; rowIdx < sheetData.length; rowIdx++) {
+            \\              while (sheetData[rowIdx].length < sheetColumns.length) {
+            \\                sheetData[rowIdx].push(null);
+            \\              }
+            \\            }
+            \\          }
+            \\
+            \\          const trimmed = cellVal.trim();
+            \\          if (trimmed.startsWith('=')) {
+            \\            sheetFormulas[r + ',' + c] = trimmed;
+            \\          } else {
+            \\            delete sheetFormulas[r + ',' + c];
+            \\            if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+            \\              sheetData[r][c] = Number(trimmed);
+            \\            } else {
+            \\              sheetData[r][c] = cellVal;
+            \\            }
+            \\          }
+            \\        });
+            \\
+            \\        sheetModifiedRows.add(r);
+            \\        rowsPasted++;
+            \\      });
+            \\
+            \\      renderSpreadsheetGrid();
+            \\      updateSpreadsheetCommitButton();
+            \\      updateSpreadsheetStatusBar();
+            \\      showModelAlert('success', `📥 Pasted ${rowsPasted} row(s) × ${maxColsPasted} col(s) directly from Google Sheets!`);
+            \\    }
+            \\
+            \\    function addSpreadsheetRow() {
+            \\      const newRow = new Array(sheetColumns.length).fill(null);
+            \\      sheetData.push(newRow);
+            \\      sheetModifiedRows.add(sheetData.length - 1);
+            \\      sheetActiveCell = { r: sheetData.length - 1, c: 0 };
+            \\      sheetSelectionRange = null;
+            \\      renderSpreadsheetGrid();
+            \\      updateSpreadsheetCommitButton();
+            \\      updateSpreadsheetActiveCellDisplay();
+            \\      updateSpreadsheetStatusBar();
+            \\      const wrapper = document.getElementById('sheetGridWrapper');
+            \\      if (wrapper) wrapper.scrollTop = wrapper.scrollHeight;
+            \\    }
+            \\
+            \\    async function deleteSpreadsheetSelectedRow() {
+            \\      const r = sheetActiveCell.r;
+            \\      if (r < 0 || r >= sheetData.length) return;
+            \\
+            \\      if (!confirm(`Delete row ${r + 1}?`)) return;
+            \\
+            \\      if (sheetCurrentSource.startsWith('table:')) {
+            \\        const tableName = sheetCurrentSource.substring(6);
+            \\        const tableInfo = (knownTables || []).find(t => t.name.toLowerCase() === tableName.toLowerCase());
+            \\        let pkCol = 'id';
+            \\        if (tableInfo && tableInfo.columns) {
+            \\          const pkObj = tableInfo.columns.find(c => c.primary_key);
+            \\          if (pkObj) pkCol = pkObj.name;
+            \\        }
+            \\        const pkColIdx = sheetColumns.findIndex(c => c.toLowerCase() === pkCol.toLowerCase());
+            \\        if (pkColIdx >= 0 && sheetRawData[r] && sheetRawData[r][pkColIdx] !== undefined) {
+            \\          const pkVal = sheetRawData[r][pkColIdx];
+            \\          const pkFormatted = (typeof pkVal === 'number') ? pkVal : ("'" + String(pkVal).replace(/'/g, "''") + "'");
+            \\          const q = `DELETE FROM ${tableName} WHERE ${pkCol} = ${pkFormatted};`;
+            \\          try {
+            \\            await fetch('/api/query', {
+            \\              method: 'POST',
+            \\              headers: { 'Content-Type': 'application/json' },
+            \\              body: JSON.stringify({ query: q })
+            \\            });
+            \\          } catch (err) {
+            \\            console.error('Delete error:', err);
+            \\          }
+            \\        }
+            \\      }
+            \\
+            \\      sheetData.splice(r, 1);
+            \\      if (r < sheetRawData.length) sheetRawData.splice(r, 1);
+            \\      sheetModifiedRows.delete(r);
+            \\
+            \\      if (sheetActiveCell.r >= sheetData.length) {
+            \\        sheetActiveCell.r = Math.max(0, sheetData.length - 1);
+            \\      }
+            \\      sheetSelectionRange = null;
+            \\
+            \\      renderSpreadsheetGrid();
+            \\      updateSpreadsheetCommitButton();
+            \\      updateSpreadsheetActiveCellDisplay();
+            \\      updateSpreadsheetStatusBar();
+            \\      showModelAlert('success', `Row deleted.`);
+            \\    }
+            \\
+            \\    function updateSpreadsheetCommitButton() {
+            \\      const btn = document.getElementById('sheetCommitBtn');
+            \\      if (!btn) return;
+            \\
+            \\      const isSingleTable = sheetCurrentSource.startsWith('table:');
+            \\      if (!isSingleTable || sheetModifiedRows.size === 0) {
+            \\        btn.style.display = 'none';
+            \\      } else {
+            \\        btn.style.display = 'inline-block';
+            \\        btn.innerText = `💾 Commit to DB (${sheetModifiedRows.size})`;
+            \\      }
+            \\
+            \\      const dirtyBadge = document.getElementById('sheetDirtyBadge');
+            \\      if (dirtyBadge) {
+            \\        if (sheetModifiedRows.size > 0) {
+            \\          dirtyBadge.style.display = 'inline';
+            \\          dirtyBadge.innerText = `● ${sheetModifiedRows.size} unsaved edits`;
+            \\        } else {
+            \\          dirtyBadge.style.display = 'none';
+            \\        }
+            \\      }
+            \\    }
+            \\
+            \\    async function commitSpreadsheetToDb() {
+            \\      if (!sheetCurrentSource.startsWith('table:')) {
+            \\        alert('Only single database tables can be directly committed. Data model views are synthesized denormalized views.');
+            \\        return;
+            \\      }
+            \\      const tableName = sheetCurrentSource.substring(6);
+            \\      const tableInfo = (knownTables || []).find(t => t.name.toLowerCase() === tableName.toLowerCase());
+            \\      let pkCol = 'id';
+            \\      if (tableInfo && tableInfo.columns) {
+            \\        const pkObj = tableInfo.columns.find(c => c.primary_key);
+            \\        if (pkObj) pkCol = pkObj.name;
+            \\      }
+            \\      const pkColIdx = sheetColumns.findIndex(c => c.toLowerCase() === pkCol.toLowerCase());
+            \\
+            \\      const queries = [];
+            \\      for (const r of sheetModifiedRows) {
+            \\        if (!sheetData[r]) continue;
+            \\        if (r < sheetRawData.length && sheetRawData[r]) {
+            \\          const pkVal = (pkColIdx >= 0) ? sheetRawData[r][pkColIdx] : null;
+            \\          if (pkVal !== null && pkVal !== undefined) {
+            \\            const setClauses = [];
+            \\            for (let c = 0; c < sheetColumns.length; c++) {
+            \\              if (c === pkColIdx) continue;
+            \\              let val = getSpreadsheetCellValue(r, c);
+            \\              if (val === null || val === undefined || val === '') {
+            \\                setClauses.push(`${sheetColumns[c]} = NULL`);
+            \\              } else if (typeof val === 'number') {
+            \\                setClauses.push(`${sheetColumns[c]} = ${val}`);
+            \\              } else {
+            \\                setClauses.push(`${sheetColumns[c]} = '${String(val).replace(/'/g, "''")}'`);
+            \\              }
+            \\            }
+            \\            if (setClauses.length > 0) {
+            \\              const pkFormatted = (typeof pkVal === 'number') ? pkVal : `'${String(pkVal).replace(/'/g, "''")}'`;
+            \\              queries.push(`UPDATE ${tableName} SET ${setClauses.join(', ')} WHERE ${pkCol} = ${pkFormatted};`);
+            \\            }
+            \\          }
+            \\        } else {
+            \\          const colNames = [];
+            \\          const valLiterals = [];
+            \\          for (let c = 0; c < sheetColumns.length; c++) {
+            \\            let val = getSpreadsheetCellValue(r, c);
+            \\            if (val !== null && val !== undefined && val !== '') {
+            \\              colNames.push(sheetColumns[c]);
+            \\              if (typeof val === 'number') {
+            \\                valLiterals.push(String(val));
+            \\              } else {
+            \\                valLiterals.push(`'${String(val).replace(/'/g, "''")}'`);
+            \\              }
+            \\            }
+            \\          }
+            \\          if (colNames.length > 0) {
+            \\            queries.push(`INSERT INTO ${tableName} (${colNames.join(', ')}) VALUES (${valLiterals.join(', ')});`);
+            \\          }
+            \\        }
+            \\      }
+            \\
+            \\      if (queries.length === 0) {
+            \\        showModelAlert('success', 'No changes to commit.');
+            \\        sheetModifiedRows.clear();
+            \\        updateSpreadsheetCommitButton();
+            \\        return;
+            \\      }
+            \\
+            \\      let successCount = 0;
+            \\      for (const q of queries) {
+            \\        try {
+            \\          const res = await fetch('/api/query', {
+            \\            method: 'POST',
+            \\            headers: { 'Content-Type': 'application/json' },
+            \\            body: JSON.stringify({ query: q })
+            \\          });
+            \\          const resJson = await res.json();
+            \\          if (resJson.error) {
+            \\            console.error('Commit query error:', q, resJson.error);
+            \\          } else {
+            \\            successCount++;
+            \\          }
+            \\        } catch (err) {
+            \\          console.error('Commit network error:', err);
+            \\        }
+            \\      }
+            \\
+            \\      sheetModifiedRows.clear();
+            \\      await reloadSpreadsheetData();
+            \\      showModelAlert('success', `💾 Committed ${successCount} record update(s) to ${tableName} in StrataDB!`);
+            \\    }
+            \\
+            \\    function updateSpreadsheetStatusBar() {
+            \\      const dimBadge = document.getElementById('sheetDimensionsBadge');
+            \\      if (dimBadge) {
+            \\        dimBadge.innerText = `${sheetData.length} rows × ${sheetColumns.length} cols`;
+            \\      }
+            \\
+            \\      let minR = sheetActiveCell.r, maxR = sheetActiveCell.r;
+            \\      let minC = sheetActiveCell.c, maxC = sheetActiveCell.c;
+            \\      if (sheetSelectionRange) {
+            \\        minR = Math.min(sheetSelectionRange.startR, sheetSelectionRange.endR);
+            \\        maxR = Math.max(sheetSelectionRange.startR, sheetSelectionRange.endR);
+            \\        minC = Math.min(sheetSelectionRange.startC, sheetSelectionRange.endC);
+            \\        maxC = Math.max(sheetSelectionRange.startC, sheetSelectionRange.endC);
+            \\      }
+            \\
+            \\      const nums = [];
+            \\      let cellCount = 0;
+            \\      for (let r = minR; r <= maxR; r++) {
+            \\        if (!sheetData[r]) continue;
+            \\        for (let c = minC; c <= maxC; c++) {
+            \\          cellCount++;
+            \\          const val = getSpreadsheetCellValue(r, c);
+            \\          if (val !== null && val !== undefined && val !== '') {
+            \\            const n = parseFloat(val);
+            \\            if (!isNaN(n)) nums.push(n);
+            \\          }
+            \\        }
+            \\      }
+            \\
+            \\      const countEl = document.getElementById('sheetStatCount');
+            \\      const sumEl = document.getElementById('sheetStatSum');
+            \\      const avgEl = document.getElementById('sheetStatAvg');
+            \\      const minEl = document.getElementById('sheetStatMin');
+            \\      const maxEl = document.getElementById('sheetStatMax');
+            \\
+            \\      if (countEl) countEl.innerHTML = `Count: <strong>${cellCount}</strong>`;
+            \\
+            \\      if (nums.length > 1) {
+            \\        const sum = nums.reduce((a, b) => a + b, 0);
+            \\        const avg = sum / nums.length;
+            \\        const min = Math.min(...nums);
+            \\        const max = Math.max(...nums);
+            \\
+            \\        if (sumEl) { sumEl.style.display = 'inline-block'; sumEl.innerHTML = `Sum: <strong>${Number.isInteger(sum) ? sum : sum.toFixed(2)}</strong>`; }
+            \\        if (avgEl) { avgEl.style.display = 'inline-block'; avgEl.innerHTML = `Avg: <strong>${avg.toFixed(2)}</strong>`; }
+            \\        if (minEl) { minEl.style.display = 'inline-block'; minEl.innerHTML = `Min: <strong>${min}</strong>`; }
+            \\        if (maxEl) { maxEl.style.display = 'inline-block'; maxEl.innerHTML = `Max: <strong>${max}</strong>`; }
+            \\      } else {
+            \\        if (sumEl) sumEl.style.display = 'none';
+            \\        if (avgEl) avgEl.style.display = 'none';
+            \\        if (minEl) minEl.style.display = 'none';
+            \\        if (maxEl) maxEl.style.display = 'none';
+            \\      }
+            \\    }
+            \\
+            \\    function exportSpreadsheetGoogleSheetsCsv() {
+            \\      if (sheetColumns.length === 0 || sheetData.length === 0) {
+            \\        alert('No data to export.');
+            \\        return;
+            \\      }
+            \\      const lines = [];
+            \\      lines.push(sheetColumns.map(c => '"' + String(c).replace(/"/g, '""') + '"').join(','));
+            \\      for (let r = 0; r < sheetData.length; r++) {
+            \\        const rowVals = [];
+            \\        for (let c = 0; c < sheetColumns.length; c++) {
+            \\          let val = getSpreadsheetCellValue(r, c);
+            \\          if (val === null || val === undefined) val = '';
+            \\          rowVals.push('"' + String(val).replace(/"/g, '""') + '"');
+            \\        }
+            \\        lines.push(rowVals.join(','));
+            \\      }
+            \\      const csvContent = lines.join('\r\n');
+            \\      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            \\      const url = URL.createObjectURL(blob);
+            \\      const a = document.createElement('a');
+            \\      a.href = url;
+            \\      const srcName = (sheetCurrentSource || 'sheet').replace(/[^a-zA-Z0-9_]/g, '_');
+            \\      a.download = `stratadb_${srcName}.csv`;
+            \\      a.click();
+            \\      URL.revokeObjectURL(url);
+            \\    }
+            \\
+            \\    function showSpreadsheetSqlModal() {
+            \\      let query = '';
+            \\      if (sheetCurrentSource.startsWith('table:')) {
+            \\        const tableName = sheetCurrentSource.substring(6);
+            \\        query = `SELECT * FROM ${tableName} LIMIT 500;`;
+            \\      } else if (sheetCurrentSource.startsWith('model:')) {
+            \\        const modelName = sheetCurrentSource.substring(6);
+            \\        if (modelName === 'current') {
+            \\          query = generatedModelSql || buildModelSqlStatement();
+            \\        } else {
+            \\          const m = (savedModelsList || []).find(item => item.name === modelName);
+            \\          if (m) query = buildCustomModelSqlStatement(m);
+            \\        }
+            \\      }
+            \\      generatedModelSql = query;
+            \\      const codeEl = document.getElementById('modelSqlCode');
+            \\      if (codeEl) codeEl.innerText = query || '-- No SQL query available for this view';
+            \\      const modal = document.getElementById('modelSqlModal');
+            \\      if (modal) modal.style.display = 'flex';
             \\    }
             \\
             \\    document.addEventListener('mousemove', (e) => {
