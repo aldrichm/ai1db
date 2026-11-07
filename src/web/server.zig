@@ -8,6 +8,7 @@ const types = @import("../types.zig");
 const Value = types.Value;
 const Row = types.Row;
 const MariaDbImporter = @import("../compat/mariadb.zig").MariaDbImporter;
+const vector = @import("../storage/vector.zig");
 
 fn writeJsonString(writer: anytype, s: []const u8) !void {
     try writer.writeByte('"');
@@ -264,6 +265,43 @@ pub const WebServer = struct {
             if (std.mem.indexOf(u8, request, "\r\n\r\n")) |body_idx| {
                 const body = request[body_idx + 4 ..];
                 self.serveModelsDelete(stream, body);
+            } else {
+                sendError(stream, 400, "Bad Request");
+            }
+        } else if (std.mem.eql(u8, method, "GET") and std.mem.eql(u8, path, "/api/rag/collections")) {
+            self.serveRagCollections(stream);
+        } else if (std.mem.eql(u8, method, "POST") and std.mem.eql(u8, path, "/api/rag/infeed")) {
+            if (std.mem.indexOf(u8, request, "\r\n\r\n")) |body_idx| {
+                const body = request[body_idx + 4 ..];
+                self.serveRagInfeed(stream, body);
+            } else {
+                sendError(stream, 400, "Bad Request");
+            }
+        } else if (std.mem.eql(u8, method, "POST") and std.mem.eql(u8, path, "/api/rag/infeed/table")) {
+            if (std.mem.indexOf(u8, request, "\r\n\r\n")) |body_idx| {
+                const body = request[body_idx + 4 ..];
+                self.serveRagInfeedTable(stream, body);
+            } else {
+                sendError(stream, 400, "Bad Request");
+            }
+        } else if (std.mem.eql(u8, method, "POST") and std.mem.eql(u8, path, "/api/rag/query")) {
+            if (std.mem.indexOf(u8, request, "\r\n\r\n")) |body_idx| {
+                const body = request[body_idx + 4 ..];
+                self.serveRagQuery(stream, body);
+            } else {
+                sendError(stream, 400, "Bad Request");
+            }
+        } else if (std.mem.eql(u8, method, "POST") and std.mem.eql(u8, path, "/api/rag/collections/delete")) {
+            if (std.mem.indexOf(u8, request, "\r\n\r\n")) |body_idx| {
+                const body = request[body_idx + 4 ..];
+                self.serveRagDeleteCollection(stream, body);
+            } else {
+                sendError(stream, 400, "Bad Request");
+            }
+        } else if (std.mem.eql(u8, method, "POST") and std.mem.eql(u8, path, "/api/vector/search")) {
+            if (std.mem.indexOf(u8, request, "\r\n\r\n")) |body_idx| {
+                const body = request[body_idx + 4 ..];
+                self.serveVectorSearch(stream, body);
             } else {
                 sendError(stream, 400, "Bad Request");
             }
@@ -1974,6 +2012,115 @@ pub const WebServer = struct {
             \\    .sheet-stat-pill strong {
             \\      color: #38bdf8;
             \\    }
+            \\
+            \\    /* RAG & Vector Studio Styles */
+            \\    .rag-grid {
+            \\      display: grid;
+            \\      grid-template-columns: 1fr 1fr;
+            \\      gap: 20px;
+            \\      margin-bottom: 20px;
+            \\    }
+            \\    @media (max-width: 1200px) {
+            \\      .rag-grid { grid-template-columns: 1fr; }
+            \\    }
+            \\    .rag-card {
+            \\      background: var(--card);
+            \\      border: 1px solid var(--card-border);
+            \\      border-radius: 8px;
+            \\      padding: 16px 20px;
+            \\      display: flex;
+            \\      flex-direction: column;
+            \\      gap: 14px;
+            \\    }
+            \\    .rag-header-row {
+            \\      display: flex;
+            \\      justify-content: space-between;
+            \\      align-items: center;
+            \\      border-bottom: 1px solid var(--card-border);
+            \\      padding-bottom: 10px;
+            \\      margin-bottom: 4px;
+            \\    }
+            \\    .rag-header-row h3 {
+            \\      font-size: 13px;
+            \\      font-weight: 700;
+            \\      letter-spacing: 0.05em;
+            \\      color: #fff;
+            \\      display: flex;
+            \\      align-items: center;
+            \\      gap: 8px;
+            \\      text-transform: none;
+            \\    }
+            \\    .rag-score-badge {
+            \\      display: inline-flex;
+            \\      align-items: center;
+            \\      gap: 4px;
+            \\      padding: 2px 8px;
+            \\      border-radius: 4px;
+            \\      font-size: 11px;
+            \\      font-weight: 700;
+            \\      font-family: monospace;
+            \\    }
+            \\    .rag-score-high {
+            \\      background: rgba(16, 185, 129, 0.15);
+            \\      color: #10b981;
+            \\      border: 1px solid rgba(16, 185, 129, 0.3);
+            \\    }
+            \\    .rag-score-med {
+            \\      background: rgba(56, 189, 248, 0.15);
+            \\      color: #38bdf8;
+            \\      border: 1px solid rgba(56, 189, 248, 0.3);
+            \\    }
+            \\    .rag-score-low {
+            \\      background: rgba(245, 158, 11, 0.15);
+            \\      color: #f59e0b;
+            \\      border: 1px solid rgba(245, 158, 11, 0.3);
+            \\    }
+            \\    .rag-chunk-card {
+            \\      background: rgba(15, 23, 42, 0.6);
+            \\      border: 1px solid var(--card-border);
+            \\      border-radius: 6px;
+            \\      padding: 12px;
+            \\      display: flex;
+            \\      flex-direction: column;
+            \\      gap: 6px;
+            \\      transition: border-color 0.15s ease;
+            \\    }
+            \\    .rag-chunk-card:hover {
+            \\      border-color: var(--accent);
+            \\    }
+            \\    .rag-chunk-meta {
+            \\      display: flex;
+            \\      justify-content: space-between;
+            \\      align-items: center;
+            \\      font-size: 11px;
+            \\      color: var(--text-muted);
+            \\    }
+            \\    .rag-chunk-text {
+            \\      font-size: 12px;
+            \\      line-height: 1.5;
+            \\      color: #e2e8f0;
+            \\      background: rgba(0, 0, 0, 0.2);
+            \\      padding: 8px 10px;
+            \\      border-radius: 4px;
+            \\      border-left: 2px solid var(--accent);
+            \\      white-space: pre-wrap;
+            \\      max-height: 160px;
+            \\      overflow-y: auto;
+            \\    }
+            \\    .rag-prompt-preview {
+            \\      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            \\      font-size: 11.5px;
+            \\      line-height: 1.45;
+            \\      background: #020617;
+            \\      color: #94a3b8;
+            \\      border: 1px solid #1e293b;
+            \\      border-radius: 6px;
+            \\      padding: 12px;
+            \\      white-space: pre-wrap;
+            \\      max-height: 240px;
+            \\      overflow-y: auto;
+            \\      user-select: all;
+            \\    }
             \\  </style>
             \\</head>
             \\<body>
@@ -2031,6 +2178,9 @@ pub const WebServer = struct {
             \\    </button>
             \\    <button id="tabBtnModels" class="nav-tab" onclick="switchMainTab('models')">
             \\      <span>📐</span> Data Models &amp; UI Builder
+            \\    </button>
+            \\    <button id="tabBtnRag" class="nav-tab" onclick="switchMainTab('rag')">
+            \\      <span>🧠</span> RAG &amp; Vector Studio
             \\    </button>
             \\  </div>
             \\
@@ -3008,6 +3158,236 @@ pub const WebServer = struct {
             \\    </div>
             \\  </div>
             \\
+            \\  <!-- RAG & Vector Studio View -->
+            \\  <div id="ragView" style="display: none; flex-direction: column; gap: 20px;">
+            \\    <!-- RAG Header & Stats Bar -->
+            \\    <div class="card" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+            \\      <div>
+            \\        <h2 style="font-size: 18px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 8px;">
+            \\          <span>🧠</span> RAG &amp; Vector Studio
+            \\          <span class="badge badge-accent" style="font-size: 11px;">Dense 384-D Vector Engine</span>
+            \\        </h2>
+            \\        <div style="font-size: 12px; color: var(--text-muted); margin-top: 3px;">
+            \\          Pure-Zig Subword N-Gram Vectorizer &bull; Cosine Similarity Search &bull; Context Window Augmented Generation &bull; Distributed Vector Tables
+            \\        </div>
+            \\      </div>
+            \\      <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            \\        <span class="sheet-stat-pill">Active Collections: <strong id="ragStatCollCount">0</strong></span>
+            \\        <span class="sheet-stat-pill">Indexed Chunks: <strong id="ragStatChunkCount">0</strong></span>
+            \\        <span class="sheet-stat-pill">Vector Metric: <strong>Cosine Distance</strong></span>
+            \\        <button class="btn-secondary btn-sm" onclick="loadRagCollections()">↻ Refresh</button>
+            \\      </div>
+            \\    </div>
+            \\
+            \\    <!-- Alert Box for RAG Studio -->
+            \\    <div id="ragAlert" class="alert-box" style="display: none;"></div>
+            \\
+            \\    <!-- Main Two-Column Grid: Left Infeed Pipelines, Right Semantic Query & Prompt Generation -->
+            \\    <div class="rag-grid">
+            \\      <!-- Left Column: Infeed Pipelines -->
+            \\      <div class="rag-card">
+            \\        <div class="rag-header-row">
+            \\          <h3><span>📥</span> Vector Infeed Pipeline</h3>
+            \\          <div class="subview-toggle">
+            \\            <button id="ragTabBtnDoc" class="subview-btn active" onclick="switchRagInfeedTab('doc')">
+            \\              <span>📄</span> Document Text
+            \\            </button>
+            \\            <button id="ragTabBtnTable" class="subview-btn" onclick="switchRagInfeedTab('table')">
+            \\              <span>🗄️</span> Relational Table
+            \\            </button>
+            \\          </div>
+            \\        </div>
+            \\
+            \\        <!-- Document Text Infeed Sub-Panel -->
+            \\        <div id="ragDocInfeedPanel" style="display: flex; flex-direction: column; gap: 12px;">
+            \\          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            \\            <div>
+            \\              <label class="form-label">Target Collection Name: <span style="color: var(--accent);">*</span></label>
+            \\              <input type="text" id="ragDocCollection" class="form-control" placeholder="e.g. manuals, knowledge_base" list="ragExistingCollList" />
+            \\              <datalist id="ragExistingCollList"></datalist>
+            \\            </div>
+            \\            <div>
+            \\              <label class="form-label">Document Title: <span style="color: var(--accent);">*</span></label>
+            \\              <input type="text" id="ragDocTitle" class="form-control" placeholder="e.g. Pump Operating Guide" />
+            \\            </div>
+            \\          </div>
+            \\
+            \\          <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px;">
+            \\            <div>
+            \\              <label class="form-label">Source URI / Ref:</label>
+            \\              <input type="text" id="ragDocSource" class="form-control" placeholder="e.g. docs/pump_guide_v2.pdf" />
+            \\            </div>
+            \\            <div>
+            \\              <label class="form-label">Chunk Size (chars):</label>
+            \\              <input type="number" id="ragDocChunkSize" class="form-control" value="500" min="100" max="4000" />
+            \\            </div>
+            \\            <div>
+            \\              <label class="form-label">Overlap (chars):</label>
+            \\              <input type="number" id="ragDocChunkOverlap" class="form-control" value="100" min="0" max="1000" />
+            \\            </div>
+            \\          </div>
+            \\
+            \\          <div>
+            \\            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            \\              <label class="form-label" style="margin: 0;">Unstructured Text Content: <span style="color: var(--accent);">*</span></label>
+            \\              <button class="btn-secondary btn-sm" style="padding: 2px 8px; font-size: 11px;" onclick="loadSampleDoc()">📄 Load Sample Technical Doc</button>
+            \\            </div>
+            \\            <textarea id="ragDocText" class="form-control" rows="10" placeholder="Paste technical manuals, operational guidelines, troubleshooting notes, customer logs, or domain literature to vectorize..."></textarea>
+            \\          </div>
+            \\
+            \\          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+            \\            <button id="ragDocInfeedBtn" class="btn-primary" onclick="submitDocInfeed()">
+            \\              <span>⚡</span> Infeed &amp; Vectorize Document
+            \\            </button>
+            \\            <span id="ragDocStatus" style="font-size: 12px; color: var(--text-muted);"></span>
+            \\          </div>
+            \\        </div>
+            \\
+            \\        <!-- Relational Table Infeed Sub-Panel -->
+            \\        <div id="ragTableInfeedPanel" style="display: none; flex-direction: column; gap: 12px;">
+            \\          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            \\            <div>
+            \\              <label class="form-label">Source Relational Table: <span style="color: var(--accent);">*</span></label>
+            \\              <select id="ragTableSource" class="form-control" onchange="onRagSourceTableChange()">
+            \\                <option value="">&mdash; Select Table &mdash;</option>
+            \\              </select>
+            \\            </div>
+            \\            <div>
+            \\              <label class="form-label">Target Collection Name: <span style="color: var(--accent);">*</span></label>
+            \\              <input type="text" id="ragTableCollection" class="form-control" placeholder="e.g. tbl_equipment" />
+            \\            </div>
+            \\          </div>
+            \\
+            \\          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            \\            <div>
+            \\              <label class="form-label">ID / Key Column (optional):</label>
+            \\              <select id="ragTableIdCol" class="form-control">
+            \\                <option value="">&mdash; Auto (Row Index) &mdash;</option>
+            \\              </select>
+            \\            </div>
+            \\            <div>
+            \\              <label class="form-label">Max Rows to Vectorize:</label>
+            \\              <input type="number" id="ragTableMaxRows" class="form-control" value="1000" min="1" max="100000" />
+            \\            </div>
+            \\          </div>
+            \\
+            \\          <div>
+            \\            <label class="form-label">Columns to Vectorize (Concatenated into Document Chunks):</label>
+            \\            <div id="ragTableColsContainer" style="display: flex; flex-wrap: wrap; gap: 8px; max-height: 140px; overflow-y: auto; padding: 10px; background: rgba(0,0,0,0.25); border: 1px solid var(--card-border); border-radius: 6px;">
+            \\              <span style="font-size: 12px; color: var(--text-muted);">Select a source table above to configure columns.</span>
+            \\            </div>
+            \\          </div>
+            \\
+            \\          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+            \\            <button id="ragTableInfeedBtn" class="btn-primary" onclick="submitTableInfeed()">
+            \\              <span>⚡</span> Vectorize Relational Table
+            \\            </button>
+            \\            <span id="ragTableStatus" style="font-size: 12px; color: var(--text-muted);"></span>
+            \\          </div>
+            \\        </div>
+            \\      </div>
+            \\
+            \\      <!-- Right Column: Semantic Search & Context Assembler -->
+            \\      <div class="rag-card">
+            \\        <div class="rag-header-row">
+            \\          <h3><span>🔍</span> Semantic Search &amp; Context Assembler</h3>
+            \\          <span class="badge badge-accent" style="font-size: 11px;">RAG Prompt Generator</span>
+            \\        </div>
+            \\
+            \\        <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px;">
+            \\          <div>
+            \\            <label class="form-label">Search In Collection: <span style="color: var(--accent);">*</span></label>
+            \\            <select id="ragSearchCollection" class="form-control" onchange="onRagSearchCollectionChange()">
+            \\              <option value="">&mdash; Select Collection &mdash;</option>
+            \\            </select>
+            \\          </div>
+            \\          <div>
+            \\            <label class="form-label">Top Results (K):</label>
+            \\            <select id="ragSearchTopK" class="form-control">
+            \\              <option value="3">Top 3</option>
+            \\              <option value="5" selected>Top 5</option>
+            \\              <option value="10">Top 10</option>
+            \\              <option value="20">Top 20</option>
+            \\            </select>
+            \\          </div>
+            \\          <div>
+            \\            <label class="form-label">Min Score:</label>
+            \\            <input type="number" id="ragSearchMinScore" class="form-control" value="0.0" step="0.05" min="0" max="1" />
+            \\          </div>
+            \\        </div>
+            \\
+            \\        <div>
+            \\          <label class="form-label">Natural Language Question / Semantic Query: <span style="color: var(--accent);">*</span></label>
+            \\          <div style="display: flex; gap: 8px;">
+            \\            <textarea id="ragSearchQuery" class="form-control" rows="2" placeholder="e.g. What are the primary causes of pump bearing overheating and how do I fix it?" style="resize: vertical;"></textarea>
+            \\            <button id="ragSearchBtn" class="btn-primary btn-gradient" style="white-space: nowrap; padding: 0 16px; align-self: stretch;" onclick="submitRagQuery()">
+            \\              <span>🔍</span> Search &amp; Assemble
+            \\            </button>
+            \\          </div>
+            \\        </div>
+            \\
+            \\        <!-- Semantic Matches Preview -->
+            \\        <div>
+            \\          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            \\            <span style="font-size: 12px; font-weight: 600; color: #cbd5e1;">Top Semantic Matches (<span id="ragMatchCount">0</span>)</span>
+            \\            <span id="ragSearchDuration" style="font-size: 11px; color: var(--text-muted);"></span>
+            \\          </div>
+            \\          <div id="ragSearchResultsContainer" style="display: flex; flex-direction: column; gap: 8px; max-height: 240px; overflow-y: auto; padding-right: 4px;">
+            \\            <div style="text-align: center; color: var(--text-muted); padding: 30px 10px; font-size: 12px;">
+            \\              No query executed yet. Infeed documentation or relational rows, then enter a question above.
+            \\            </div>
+            \\          </div>
+            \\        </div>
+            \\
+            \\        <!-- Assembled LLM Prompt & Context Window -->
+            \\        <div>
+            \\          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            \\            <span style="font-size: 12px; font-weight: 600; color: var(--accent);">Assembled LLM Context Window &amp; Prompt</span>
+            \\            <button class="btn-secondary btn-sm" onclick="copyRagContextPrompt()">📋 Copy Prompt to Clipboard</button>
+            \\          </div>
+            \\          <div id="ragAssembledPromptBox" class="rag-prompt-preview">
+            \\// Assembled prompt and RAG context will appear here ready to copy to Claude, Gemini, or OpenAI...
+            \\          </div>
+            \\        </div>
+            \\      </div>
+            \\    </div>
+            \\
+            \\    <!-- Bottom Card: Vector Collections Management -->
+            \\    <div class="card">
+            \\      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+            \\        <h3 style="font-size: 13px; font-weight: 700; color: #fff; margin: 0; display: flex; align-items: center; gap: 8px; text-transform: none;">
+            \\          <span>📚</span> Active Vector Collections &amp; Physical Tables
+            \\        </h3>
+            \\        <span style="font-size: 12px; color: var(--text-muted);">
+            \\          Each collection is backed by an internal StrataDB table prefixed with <code style="color: var(--accent);">_rag_</code> with full WAL, ACID, and P2P mesh sync.
+            \\        </span>
+            \\      </div>
+            \\
+            \\      <div class="table-wrapper" style="max-height: 280px; overflow-y: auto;">
+            \\        <table class="studio-table" style="width: 100%;">
+            \\          <thead>
+            \\            <tr>
+            \\              <th>Collection Name</th>
+            \\              <th>Underlying Table</th>
+            \\              <th>Chunks</th>
+            \\              <th>Documents</th>
+            \\              <th>Dimensions</th>
+            \\              <th>Created Date</th>
+            \\              <th style="text-align: right;">Actions</th>
+            \\            </tr>
+            \\          </thead>
+            \\          <tbody id="ragCollectionsTableBody">
+            \\            <tr>
+            \\              <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 20px;">
+            \\                Loading vector collections...
+            \\              </td>
+            \\            </tr>
+            \\          </tbody>
+            \\        </table>
+            \\      </div>
+            \\    </div>
+            \\  </div>
+            \\
             \\  <script>
             \\    let knownTables = [];
             \\    let selectedTypeaheadIndex = 0;
@@ -3105,29 +3485,35 @@ pub const WebServer = struct {
             \\      const studioView = document.getElementById('studioView');
             \\      const tableDataView = document.getElementById('tableDataView');
             \\      const modelsView = document.getElementById('modelsView');
+            \\      const ragView = document.getElementById('ragView');
             \\      const tabBtnSql = document.getElementById('tabBtnSql');
             \\      const tabBtnStudio = document.getElementById('tabBtnStudio');
             \\      const tabBtnTableData = document.getElementById('tabBtnTableData');
             \\      const tabBtnModels = document.getElementById('tabBtnModels');
+            \\      const tabBtnRag = document.getElementById('tabBtnRag');
             \\
             \\      if (tab === 'sql') {
             \\        if (sqlView) sqlView.style.display = 'grid';
             \\        if (studioView) studioView.style.display = 'none';
             \\        if (tableDataView) tableDataView.style.display = 'none';
             \\        if (modelsView) modelsView.style.display = 'none';
+            \\        if (ragView) ragView.style.display = 'none';
             \\        if (tabBtnSql) tabBtnSql.classList.add('active');
             \\        if (tabBtnStudio) tabBtnStudio.classList.remove('active');
             \\        if (tabBtnTableData) tabBtnTableData.classList.remove('active');
             \\        if (tabBtnModels) tabBtnModels.classList.remove('active');
+            \\        if (tabBtnRag) tabBtnRag.classList.remove('active');
             \\      } else if (tab === 'studio') {
             \\        if (sqlView) sqlView.style.display = 'none';
             \\        if (studioView) studioView.style.display = 'grid';
             \\        if (tableDataView) tableDataView.style.display = 'none';
             \\        if (modelsView) modelsView.style.display = 'none';
+            \\        if (ragView) ragView.style.display = 'none';
             \\        if (tabBtnSql) tabBtnSql.classList.remove('active');
             \\        if (tabBtnStudio) tabBtnStudio.classList.add('active');
             \\        if (tabBtnTableData) tabBtnTableData.classList.remove('active');
             \\        if (tabBtnModels) tabBtnModels.classList.remove('active');
+            \\        if (tabBtnRag) tabBtnRag.classList.remove('active');
             \\        renderStudioCatalog();
             \\        if (!currentStudioTable && studioMode !== 'create') {
             \\          if (knownTables && knownTables.length > 0) {
@@ -3146,21 +3532,37 @@ pub const WebServer = struct {
             \\        if (studioView) studioView.style.display = 'none';
             \\        if (tableDataView) tableDataView.style.display = 'flex';
             \\        if (modelsView) modelsView.style.display = 'none';
+            \\        if (ragView) ragView.style.display = 'none';
             \\        if (tabBtnSql) tabBtnSql.classList.remove('active');
             \\        if (tabBtnStudio) tabBtnStudio.classList.remove('active');
             \\        if (tabBtnTableData) tabBtnTableData.classList.add('active');
             \\        if (tabBtnModels) tabBtnModels.classList.remove('active');
+            \\        if (tabBtnRag) tabBtnRag.classList.remove('active');
             \\        updateTableDataTableSelect();
             \\      } else if (tab === 'models') {
             \\        if (sqlView) sqlView.style.display = 'none';
             \\        if (studioView) studioView.style.display = 'none';
             \\        if (tableDataView) tableDataView.style.display = 'none';
             \\        if (modelsView) modelsView.style.display = 'flex';
+            \\        if (ragView) ragView.style.display = 'none';
             \\        if (tabBtnSql) tabBtnSql.classList.remove('active');
             \\        if (tabBtnStudio) tabBtnStudio.classList.remove('active');
             \\        if (tabBtnTableData) tabBtnTableData.classList.remove('active');
             \\        if (tabBtnModels) tabBtnModels.classList.add('active');
+            \\        if (tabBtnRag) tabBtnRag.classList.remove('active');
             \\        initModelBuilder();
+            \\      } else if (tab === 'rag') {
+            \\        if (sqlView) sqlView.style.display = 'none';
+            \\        if (studioView) studioView.style.display = 'none';
+            \\        if (tableDataView) tableDataView.style.display = 'none';
+            \\        if (modelsView) modelsView.style.display = 'none';
+            \\        if (ragView) ragView.style.display = 'flex';
+            \\        if (tabBtnSql) tabBtnSql.classList.remove('active');
+            \\        if (tabBtnStudio) tabBtnStudio.classList.remove('active');
+            \\        if (tabBtnTableData) tabBtnTableData.classList.remove('active');
+            \\        if (tabBtnModels) tabBtnModels.classList.remove('active');
+            \\        if (tabBtnRag) tabBtnRag.classList.add('active');
+            \\        initRagStudio();
             \\      }
             \\    }
             \\
@@ -3928,6 +4330,7 @@ pub const WebServer = struct {
             \\        renderStudioCatalog();
             \\        updateTableDataTableSelect();
             \\        renderModelPalette();
+            \\        updateRagSourceTableSelect();
             \\        if (currentStudioTable) {
             \\          const cur = knownTables.find(t => t.name.toLowerCase() === currentStudioTable.toLowerCase());
             \\          if (cur) {
@@ -8288,6 +8691,497 @@ pub const WebServer = struct {
             \\        }
             \\      }
             \\    });
+            \\    // --- RAG & Vector Studio Logic ---
+            \\    let ragCollectionsList = [];
+            \\    let currentRagInfeedTab = 'doc';
+            \\    let lastAssembledPrompt = '';
+            \\
+            \\    function initRagStudio() {
+            \\      loadRagCollections();
+            \\      updateRagSourceTableSelect();
+            \\    }
+            \\
+            \\    function switchRagInfeedTab(tab) {
+            \\      currentRagInfeedTab = tab;
+            \\      const btnDoc = document.getElementById('ragTabBtnDoc');
+            \\      const btnTable = document.getElementById('ragTabBtnTable');
+            \\      const panelDoc = document.getElementById('ragDocInfeedPanel');
+            \\      const panelTable = document.getElementById('ragTableInfeedPanel');
+            \\      if (tab === 'doc') {
+            \\        if (btnDoc) btnDoc.classList.add('active');
+            \\        if (btnTable) btnTable.classList.remove('active');
+            \\        if (panelDoc) panelDoc.style.display = 'flex';
+            \\        if (panelTable) panelTable.style.display = 'none';
+            \\      } else {
+            \\        if (btnDoc) btnDoc.classList.remove('active');
+            \\        if (btnTable) btnTable.classList.add('active');
+            \\        if (panelDoc) panelDoc.style.display = 'none';
+            \\        if (panelTable) panelTable.style.display = 'flex';
+            \\        updateRagSourceTableSelect();
+            \\      }
+            \\    }
+            \\
+            \\    function showRagAlert(type, message) {
+            \\      const el = document.getElementById('ragAlert');
+            \\      if (!el) return;
+            \\      el.className = 'alert-box ' + (type === 'error' ? 'alert-error' : 'alert-success');
+            \\      el.innerText = message;
+            \\      el.style.display = 'block';
+            \\      setTimeout(() => {
+            \\        if (el.innerText === message) el.style.display = 'none';
+            \\      }, 7000);
+            \\    }
+            \\
+            \\    async function loadRagCollections(selectColl) {
+            \\      try {
+            \\        const resp = await fetch('/api/rag/collections');
+            \\        if (!resp.ok) return;
+            \\        const data = await resp.json();
+            \\        ragCollectionsList = Array.isArray(data) ? data : [];
+            \\
+            \\        // Update stats
+            \\        const statColl = document.getElementById('ragStatCollCount');
+            \\        const statChunk = document.getElementById('ragStatChunkCount');
+            \\        if (statColl) statColl.innerText = ragCollectionsList.length;
+            \\
+            \\        let totalChunks = 0;
+            \\        ragCollectionsList.forEach(c => totalChunks += (c.chunk_count || 0));
+            \\        if (statChunk) statChunk.innerText = totalChunks;
+            \\
+            \\        // Update search collection select
+            \\        const searchSel = document.getElementById('ragSearchCollection');
+            \\        if (searchSel) {
+            \\          const currentVal = selectColl || searchSel.value;
+            \\          searchSel.innerHTML = '<option value="">&mdash; Select Collection &mdash;</option>';
+            \\          ragCollectionsList.forEach(c => {
+            \\            const opt = document.createElement('option');
+            \\            opt.value = c.name;
+            \\            opt.innerText = c.name + ' (' + c.chunk_count + ' chunks)';
+            \\            if (c.name === currentVal) opt.selected = true;
+            \\            searchSel.appendChild(opt);
+            \\          });
+            \\          if (!searchSel.value && ragCollectionsList.length > 0) {
+            \\            searchSel.value = selectColl || ragCollectionsList[0].name;
+            \\          }
+            \\        }
+            \\
+            \\        // Update datalist for doc collection input
+            \\        const datalist = document.getElementById('ragExistingCollList');
+            \\        if (datalist) {
+            \\          datalist.innerHTML = '';
+            \\          ragCollectionsList.forEach(c => {
+            \\            const opt = document.createElement('option');
+            \\            opt.value = c.name;
+            \\            datalist.appendChild(opt);
+            \\          });
+            \\        }
+            \\
+            \\        // Render collections table
+            \\        const tbody = document.getElementById('ragCollectionsTableBody');
+            \\        if (tbody) {
+            \\          if (ragCollectionsList.length === 0) {
+            \\            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 24px;">No vector collections yet. Infeed text or a relational table above to start RAG.</td></tr>';
+            \\          } else {
+            \\            tbody.innerHTML = '';
+            \\            ragCollectionsList.forEach(c => {
+            \\              const tr = document.createElement('tr');
+            \\              const d = c.created_at ? new Date(c.created_at * 1000).toLocaleString() : 'N/A';
+            \\              tr.innerHTML = `
+            \\                <td style="font-weight: 600; color: #fff;">${escapeHtml(c.name)}</td>
+            \\                <td><code style="color: var(--accent);">${escapeHtml(c.table_name)}</code></td>
+            \\                <td><span class="badge badge-accent">${c.chunk_count}</span></td>
+            \\                <td>${c.doc_count || 1}</td>
+            \\                <td>${c.dimension || 384}</td>
+            \\                <td style="font-size: 11px; color: var(--text-muted);">${d}</td>
+            \\                <td style="text-align: right; white-space: nowrap;">
+            \\                  <button class="btn-secondary btn-sm" onclick="selectRagCollectionForSearch('${escapeHtml(c.name)}')" title="Query this collection">🔍 Query</button>
+            \\                  <button class="btn-secondary btn-sm" onclick="openTableInTableData('${escapeHtml(c.table_name)}')" title="Inspect physical vector table in Editor">📊 Inspect</button>
+            \\                  <button class="btn-danger btn-sm" onclick="deleteRagCollection('${escapeHtml(c.name)}')" title="Delete collection">🗑️</button>
+            \\                </td>
+            \\              `;
+            \\              tbody.appendChild(tr);
+            \\            });
+            \\          }
+            \\        }
+            \\      } catch (err) {
+            \\        console.error('Failed to load RAG collections:', err);
+            \\      }
+            \\    }
+            \\
+            \\    function selectRagCollectionForSearch(collName) {
+            \\      const searchSel = document.getElementById('ragSearchCollection');
+            \\      if (searchSel) {
+            \\        searchSel.value = collName;
+            \\      }
+            \\      const queryInput = document.getElementById('ragSearchQuery');
+            \\      if (queryInput) queryInput.focus();
+            \\    }
+            \\
+            \\    function onRagSearchCollectionChange() {}
+            \\
+            \\    function updateRagSourceTableSelect() {
+            \\      const sel = document.getElementById('ragTableSource');
+            \\      if (!sel) return;
+            \\      const cur = sel.value;
+            \\      sel.innerHTML = '<option value="">&mdash; Select Table &mdash;</option>';
+            \\      if (Array.isArray(knownTables)) {
+            \\        knownTables.forEach(t => {
+            \\          if (!t.name.startsWith('_rag_')) {
+            \\            const opt = document.createElement('option');
+            \\            opt.value = t.name;
+            \\            opt.innerText = t.name + (t.row_count !== undefined ? ' (' + t.row_count + ' rows)' : '');
+            \\            if (t.name === cur) opt.selected = true;
+            \\            sel.appendChild(opt);
+            \\          }
+            \\        });
+            \\      }
+            \\    }
+            \\
+            \\    function onRagSourceTableChange() {
+            \\      const sel = document.getElementById('ragTableSource');
+            \\      const collInput = document.getElementById('ragTableCollection');
+            \\      const idSel = document.getElementById('ragTableIdCol');
+            \\      const colsCont = document.getElementById('ragTableColsContainer');
+            \\      if (!sel || !sel.value) {
+            \\        if (colsCont) colsCont.innerHTML = '<span style="font-size: 12px; color: var(--text-muted);">Select a source table above to configure columns.</span>';
+            \\        return;
+            \\      }
+            \\      const tableName = sel.value;
+            \\      if (collInput && !collInput.value) {
+            \\        collInput.value = 'tbl_' + tableName;
+            \\      }
+            \\
+            \\      const tableMeta = knownTables.find(t => t.name === tableName);
+            \\      if (!tableMeta || !Array.isArray(tableMeta.columns)) {
+            \\        if (colsCont) colsCont.innerHTML = '<span style="font-size: 12px; color: var(--text-muted);">No schema found for table ' + escapeHtml(tableName) + '.</span>';
+            \\        return;
+            \\      }
+            \\
+            \\      if (idSel) {
+            \\        idSel.innerHTML = '<option value="">&mdash; Auto (Row Index) &mdash;</option>';
+            \\        tableMeta.columns.forEach(col => {
+            \\          const opt = document.createElement('option');
+            \\          opt.value = col.name;
+            \\          opt.innerText = col.name + (col.is_primary_key ? ' [PK]' : '');
+            \\          if (col.is_primary_key) opt.selected = true;
+            \\          idSel.appendChild(opt);
+            \\        });
+            \\      }
+            \\
+            \\      if (colsCont) {
+            \\        colsCont.innerHTML = '';
+            \\        tableMeta.columns.forEach(col => {
+            \\          const isTextType = (col.type === 'text' || col.type === 'varchar' || col.type === 'string');
+            \\          const lbl = document.createElement('label');
+            \\          lbl.style.cssText = 'display: inline-flex; align-items: center; gap: 5px; font-size: 12px; background: #1e293b; padding: 4px 8px; border-radius: 4px; border: 1px solid #334155; cursor: pointer;';
+            \\          lbl.innerHTML = `<input type="checkbox" class="rag-col-checkbox" value="${escapeHtml(col.name)}" ${isTextType ? 'checked' : ''} /> <span>${escapeHtml(col.name)} <span style="font-size: 10px; color: var(--accent);">(${col.type})</span></span>`;
+            \\          colsCont.appendChild(lbl);
+            \\        });
+            \\      }
+            \\    }
+            \\
+            \\    function loadSampleDoc() {
+            \\      document.getElementById('ragDocCollection').value = 'hydraulic_systems';
+            \\      document.getElementById('ragDocTitle').value = 'High-Pressure Hydraulic Pump Operation & Maintenance Guide';
+            \\      document.getElementById('ragDocSource').value = 'manuals/pump_ops_guide_v4.pdf';
+            \\      document.getElementById('ragDocChunkSize').value = '400';
+            \\      document.getElementById('ragDocChunkOverlap').value = '80';
+            \\      document.getElementById('ragDocText').value = 
+            \\`SECTION 1: SYSTEM OVERVIEW AND STARTUP SEQUENCE\\n` +
+            \\`The Model HP-9000 Axial Piston Hydraulic Pump delivers operating pressures up to 350 bar (5000 PSI) with an optimal flow rate of 120 L/min.\\n` +
+            \\`Prior to system startup, verify that reservoir hydraulic fluid meets ISO VG 46 purity standards (cleanliness code ISO 4406: 18/16/13 or better).\\n` +
+            \\`Ensure suction isolation valves are fully open and pump casing is filled with clean hydraulic oil through the case drain port.\\n` +
+            \\`Never start the pump dry; dry running will score the valve plate and destroy rotating group swashplates within 10 seconds.\\n` +
+            \\`Startup procedure:\\n` +
+            \\`1. Jog prime mover motor for 2-3 seconds to verify correct shaft rotation (clockwise viewed from shaft end).\\n` +
+            \\`2. Run unloaded at minimum pressure (bypass mode) for 5 minutes until fluid temperature stabilizes between 35°C and 55°C.\\n` +
+            \\`3. Gradually ramp proportional relief valve to working pressure while monitoring system noise and vibration levels.\\n\\n` +
+            \\`SECTION 2: BEARING OVERHEATING AND TEMPERATURE THRESHOLDS\\n` +
+            \\`Standard operating temperature of drive shaft tapered roller bearings must not exceed 75°C (167°F).\\n` +
+            \\`Operating temperatures above 85°C trigger a warning alarm, while temperatures exceeding 95°C require immediate emergency shutdown.\\n` +
+            \\`Primary root causes for excessive bearing overheating:\\n` +
+            \\`1. Shaft Misalignment: Angular misalignment between electric motor shaft and pump input shaft exceeding 0.05 mm causes severe radial preloading.\\n` +
+            \\`2. Contaminated Lubrication: Particulate ingression or moisture condensation degrading anti-wear additive packages in hydraulic fluid.\\n` +
+            \\`3. Inadequate Case Drain Pressure: Excessive case pressure exceeding 1.5 bar blows shaft lip seals and starves bearings of lubricating flow.\\n` +
+            \\`4. Over-tightened Drive Belts: Excessive belt tension generating asymmetrical bending moments across the drive bearing housing.\\n` +
+            \\`Remedial actions:\\n` +
+            \\`Perform dynamic laser alignment between pump and motor. Inspect case drain line for obstructions or back-pressure. Flush system and replace high-pressure return filters.\\n\\n` +
+            \\`SECTION 3: CAVITATION AND AERATION DIAGNOSTICS\\n` +
+            \\`Cavitation manifests as high-frequency metallic cracking or gravel-like rattling inside the pump barrel.\\n` +
+            \\`Symptoms of cavitation and aeration:\\n` +
+            \\`- Erratic cylinder positioning and violent actuator chatter under load.\\n` +
+            \\`- Milky, foaming hydraulic fluid in sight glass indicating air ingress via suction fittings.\\n` +
+            \\`- Pitting erosion on cylinder block face, bronze slippers, and distributor port plate.\\n` +
+            \\`Corrective measures:\\n` +
+            \\`- Verify suction strainer is not clogged with sludge or varnish (differential pressure < 0.2 bar).\\n` +
+            \\`- Ensure inlet pipe diameter is at least 2 inches to keep suction velocity below 1.2 m/s.\\n` +
+            \\`- Tighten all suction hose clamps and replace dry-rotted O-rings on intake flanges.\\n` +
+            \\`- Verify reservoir breather cap is clean and unrestricted.\\n\\n` +
+            \\`SECTION 4: PREVENTIVE MAINTENANCE SCHEDULE\\n` +
+            \\`Daily Checks:\\n` +
+            \\`- Inspect reservoir level and fluid temperature (ideal 45°C - 55°C).\\n` +
+            \\`- Monitor system pressure gauges and case drain leakage flow rate (< 2.5 L/min at maximum working pressure).\\n` +
+            \\`- Check for exterior flange weeps or weeping shaft seals.\\n` +
+            \\`Weekly Checks:\\n` +
+            \\`- Record bearing housing vibration velocity using handheld accelerometer (RMS < 2.8 mm/s is acceptable).\\n` +
+            \\`- Inspect electrical solenoid coils on proportional directional valves for thermal discoloration.\\n` +
+            \\`Monthly Checks:\\n` +
+            \\`- Extract 100 mL fluid sample for laboratory oil analysis (viscosity, water content in PPM, particle count).\\n` +
+            \\`- Replace 10-micron return line filter cartridges when differential pressure indicator enters yellow band.`;
+            \\      showRagAlert('success', 'Sample technical documentation loaded! Click "Infeed & Vectorize Document" to embed.');
+            \\    }
+            \\
+            \\    async function submitDocInfeed() {
+            \\      const coll = document.getElementById('ragDocCollection').value.trim();
+            \\      const title = document.getElementById('ragDocTitle').value.trim();
+            \\      const source = document.getElementById('ragDocSource').value.trim();
+            \\      const text = document.getElementById('ragDocText').value.trim();
+            \\      const chunkSize = parseInt(document.getElementById('ragDocChunkSize').value) || 500;
+            \\      const chunkOverlap = parseInt(document.getElementById('ragDocChunkOverlap').value) || 100;
+            \\      const statusEl = document.getElementById('ragDocStatus');
+            \\      const btn = document.getElementById('ragDocInfeedBtn');
+            \\
+            \\      if (!coll) {
+            \\        showRagAlert('error', 'Please specify a target collection name.');
+            \\        return;
+            \\      }
+            \\      if (!text) {
+            \\        showRagAlert('error', 'Please enter text content to vectorize.');
+            \\        return;
+            \\      }
+            \\
+            \\      btn.disabled = true;
+            \\      if (statusEl) statusEl.innerText = 'Chunking and generating 384-D embeddings...';
+            \\
+            \\      try {
+            \\        const resp = await fetch('/api/rag/infeed', {
+            \\          method: 'POST',
+            \\          headers: { 'Content-Type': 'application/json' },
+            \\          body: JSON.stringify({
+            \\            collection: coll,
+            \\            title: title || 'Document',
+            \\            source: source || 'manual',
+            \\            text: text,
+            \\            chunk_size: chunkSize,
+            \\            chunk_overlap: chunkOverlap
+            \\          })
+            \\        });
+            \\
+            \\        const data = await resp.json();
+            \\        if (resp.ok && data.status === 'ok') {
+            \\          showRagAlert('success', `Infeed successful! Created ${data.chunks_created} vector chunks in collection '${data.collection}' (${data.total_characters} characters, 384-D dense vectors).`);
+            \\          if (statusEl) statusEl.innerText = `Done: ${data.chunks_created} chunks indexed.`;
+            \\          await loadRagCollections(coll);
+            \\        } else {
+            \\          showRagAlert('error', 'Infeed failed: ' + (data.message || 'Unknown error'));
+            \\          if (statusEl) statusEl.innerText = 'Error occurred.';
+            \\        }
+            \\      } catch (err) {
+            \\        showRagAlert('error', 'Network error during infeed: ' + err.message);
+            \\        if (statusEl) statusEl.innerText = 'Network error.';
+            \\      } finally {
+            \\        btn.disabled = false;
+            \\      }
+            \\    }
+            \\
+            \\    async function submitTableInfeed() {
+            \\      const sel = document.getElementById('ragTableSource');
+            \\      const collInput = document.getElementById('ragTableCollection');
+            \\      const idSel = document.getElementById('ragTableIdCol');
+            \\      const maxRowsInput = document.getElementById('ragTableMaxRows');
+            \\      const statusEl = document.getElementById('ragTableStatus');
+            \\      const btn = document.getElementById('ragTableInfeedBtn');
+            \\
+            \\      const tableName = sel ? sel.value : '';
+            \\      const coll = collInput ? collInput.value.trim() : '';
+            \\      const idCol = idSel ? idSel.value : '';
+            \\      const maxRows = maxRowsInput ? parseInt(maxRowsInput.value) || 1000 : 1000;
+            \\
+            \\      if (!tableName) {
+            \\        showRagAlert('error', 'Please select a source relational table.');
+            \\        return;
+            \\      }
+            \\      if (!coll) {
+            \\        showRagAlert('error', 'Please specify a target collection name.');
+            \\        return;
+            \\      }
+            \\
+            \\      const checkedCols = [];
+            \\      document.querySelectorAll('.rag-col-checkbox:checked').forEach(cb => {
+            \\        checkedCols.push(cb.value);
+            \\      });
+            \\
+            \\      if (checkedCols.length === 0) {
+            \\        showRagAlert('error', 'Please select at least one column to vectorize.');
+            \\        return;
+            \\      }
+            \\
+            \\      btn.disabled = true;
+            \\      if (statusEl) statusEl.innerText = 'Vectorizing relational rows into 384-D embeddings...';
+            \\
+            \\      try {
+            \\        const resp = await fetch('/api/rag/infeed/table', {
+            \\          method: 'POST',
+            \\          headers: { 'Content-Type': 'application/json' },
+            \\          body: JSON.stringify({
+            \\            collection: coll,
+            \\            table_name: tableName,
+            \\            columns: checkedCols,
+            \\            id_column: idCol || null,
+            \\            max_rows: maxRows
+            \\          })
+            \\        });
+            \\
+            \\        const data = await resp.json();
+            \\        if (resp.ok && data.status === 'ok') {
+            \\          showRagAlert('success', `Table vectorization successful! Ingested ${data.rows_vectorized} rows from table '${data.source_table}' into collection '${data.collection}' (${data.total_characters} characters embedded).`);
+            \\          if (statusEl) statusEl.innerText = `Done: ${data.rows_vectorized} rows vectorized.`;
+            \\          await loadRagCollections(coll);
+            \\        } else {
+            \\          showRagAlert('error', 'Table infeed failed: ' + (data.message || 'Unknown error'));
+            \\          if (statusEl) statusEl.innerText = 'Error occurred.';
+            \\        }
+            \\      } catch (err) {
+            \\        showRagAlert('error', 'Network error during table infeed: ' + err.message);
+            \\        if (statusEl) statusEl.innerText = 'Network error.';
+            \\      } finally {
+            \\        btn.disabled = false;
+            \\      }
+            \\    }
+            \\
+            \\    async function submitRagQuery() {
+            \\      const collSel = document.getElementById('ragSearchCollection');
+            \\      const queryInput = document.getElementById('ragSearchQuery');
+            \\      const topKSel = document.getElementById('ragSearchTopK');
+            \\      const minScoreInput = document.getElementById('ragSearchMinScore');
+            \\      const btn = document.getElementById('ragSearchBtn');
+            \\      const matchCountEl = document.getElementById('ragMatchCount');
+            \\      const durationEl = document.getElementById('ragSearchDuration');
+            \\      const resultsCont = document.getElementById('ragSearchResultsContainer');
+            \\      const promptBox = document.getElementById('ragAssembledPromptBox');
+            \\
+            \\      const coll = collSel ? collSel.value.trim() : '';
+            \\      const query = queryInput ? queryInput.value.trim() : '';
+            \\      const topK = topKSel ? parseInt(topKSel.value) || 5 : 5;
+            \\      const minScore = minScoreInput ? parseFloat(minScoreInput.value) || 0.0 : 0.0;
+            \\
+            \\      if (!coll) {
+            \\        showRagAlert('error', 'Please select a collection to search.');
+            \\        return;
+            \\      }
+            \\      if (!query) {
+            \\        showRagAlert('error', 'Please enter a search query or question.');
+            \\        return;
+            \\      }
+            \\
+            \\      btn.disabled = true;
+            \\      const startTime = performance.now();
+            \\      if (resultsCont) {
+            \\        resultsCont.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">Searching vector index with cosine similarity...</div>';
+            \\      }
+            \\
+            \\      try {
+            \\        const resp = await fetch('/api/rag/query', {
+            \\          method: 'POST',
+            \\          headers: { 'Content-Type': 'application/json' },
+            \\          body: JSON.stringify({
+            \\            collection: coll,
+            \\            query: query,
+            \\            top_k: topK,
+            \\            min_score: minScore
+            \\          })
+            \\        });
+            \\
+            \\        const elapsed = Math.round(performance.now() - startTime);
+            \\        const data = await resp.json();
+            \\
+            \\        if (resp.ok && data.status === 'ok') {
+            \\          const matches = Array.isArray(data.matches) ? data.matches : [];
+            \\          if (matchCountEl) matchCountEl.innerText = matches.length;
+            \\          if (durationEl) durationEl.innerText = `${elapsed} ms (Cosine Sim)`;
+            \\
+            \\          // Render match cards
+            \\          if (resultsCont) {
+            \\            if (matches.length === 0) {
+            \\              resultsCont.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">No matches found meeting similarity criteria. Try lowering the min score or adjusting your query.</div>';
+            \\            } else {
+            \\              resultsCont.innerHTML = '';
+            \\              matches.forEach((m, idx) => {
+            \\                const score = m.score || 0;
+            \\                const scorePct = (score * 100).toFixed(1);
+            \\                let scoreClass = 'rag-score-low';
+            \\                if (score >= 0.75) scoreClass = 'rag-score-high';
+            \\                else if (score >= 0.50) scoreClass = 'rag-score-med';
+            \\
+            \\                const card = document.createElement('div');
+            \\                card.className = 'rag-chunk-card';
+            \\                card.innerHTML = `
+            \\                  <div class="rag-chunk-meta">
+            \\                    <span style="display: flex; align-items: center; gap: 8px;">
+            \\                      <strong style="color: #fff;">#${idx + 1}</strong>
+            \\                      <span style="color: var(--accent); font-weight: 600;">${escapeHtml(m.doc_title || 'Document')}</span>
+            \\                      ${m.doc_id ? `<span style="font-size: 10px; color: var(--text-muted);">(${escapeHtml(m.doc_id)})</span>` : ''}
+            \\                    </span>
+            \\                    <span class="rag-score-badge ${scoreClass}">
+            \\                      Cosine Sim: ${scorePct}%
+            \\                    </span>
+            \\                  </div>
+            \\                  <div class="rag-chunk-text">${escapeHtml(m.content || '')}</div>
+            \\                `;
+            \\                resultsCont.appendChild(card);
+            \\              });
+            \\            }
+            \\          }
+            \\
+            \\          // Render assembled prompt
+            \\          lastAssembledPrompt = data.context_prompt || '';
+            \\          if (promptBox) {
+            \\            promptBox.innerText = lastAssembledPrompt || '// No context prompt returned.';
+            \\          }
+            \\        } else {
+            \\          showRagAlert('error', 'Search failed: ' + (data.message || 'Unknown error'));
+            \\        }
+            \\      } catch (err) {
+            \\        showRagAlert('error', 'Network error during search: ' + err.message);
+            \\      } finally {
+            \\        btn.disabled = false;
+            \\      }
+            \\    }
+            \\
+            \\    function copyRagContextPrompt() {
+            \\      if (!lastAssembledPrompt) {
+            \\        showRagAlert('error', 'No assembled prompt to copy. Run a search first.');
+            \\        return;
+            \\      }
+            \\      navigator.clipboard.writeText(lastAssembledPrompt).then(() => {
+            \\        showRagAlert('success', 'Assembled prompt and context copied to clipboard!');
+            \\      }).catch(err => {
+            \\        showRagAlert('error', 'Failed to copy to clipboard: ' + err);
+            \\      });
+            \\    }
+            \\
+            \\    async function deleteRagCollection(collName) {
+            \\      if (!confirm(`Are you sure you want to permanently delete RAG collection '${collName}' and its underlying vector table?`)) {
+            \\        return;
+            \\      }
+            \\
+            \\      try {
+            \\        const resp = await fetch('/api/rag/collections/delete', {
+            \\          method: 'POST',
+            \\          headers: { 'Content-Type': 'application/json' },
+            \\          body: JSON.stringify({ collection: collName })
+            \\        });
+            \\        const data = await resp.json();
+            \\        if (resp.ok && data.status === 'ok') {
+            \\          showRagAlert('success', `Collection '${collName}' deleted.`);
+            \\          await loadRagCollections();
+            \\        } else {
+            \\          showRagAlert('error', 'Delete failed: ' + (data.message || 'Unknown error'));
+            \\        }
+            \\      } catch (err) {
+            \\        showRagAlert('error', 'Network error deleting collection: ' + err.message);
+            \\      }
+            \\    }
             \\
             \\    setInterval(updateStatus, 2000);
             \\    setInterval(fetchTables, 3000);
@@ -8554,6 +9448,363 @@ pub const WebServer = struct {
         } else {
             sendError(stream, 404, "Data model not found");
         }
+    }
+
+    fn serveRagInfeed(self: *WebServer, stream: std.net.Stream, body: []const u8) void {
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        const arena_alloc = arena.allocator();
+
+        const InfeedPayload = struct {
+            collection: []const u8,
+            title: ?[]const u8 = null,
+            source: ?[]const u8 = null,
+            doc_id: ?[]const u8 = null,
+            text: []const u8,
+            chunk_size: ?usize = null,
+            chunk_overlap: ?usize = null,
+        };
+
+        const parsed = std.json.parseFromSlice(InfeedPayload, arena_alloc, body, .{ .ignore_unknown_fields = true }) catch {
+            sendError(stream, 400, "Invalid JSON payload for RAG infeed");
+            return;
+        };
+
+        const coll = std.mem.trim(u8, parsed.value.collection, " \t\r\n");
+        if (coll.len == 0) {
+            sendError(stream, 400, "Collection name cannot be empty");
+            return;
+        }
+
+        const text = parsed.value.text;
+        if (text.len == 0) {
+            sendError(stream, 400, "Text content cannot be empty");
+            return;
+        }
+
+        const title = parsed.value.title orelse "Document";
+        const src = parsed.value.source orelse (parsed.value.doc_id orelse "manual");
+        const chunk_sz = parsed.value.chunk_size orelse 500;
+        const chunk_ov = parsed.value.chunk_overlap orelse 100;
+
+        const result = self.engine.rag.infeedDocument(
+            coll,
+            title,
+            src,
+            text,
+            chunk_sz,
+            chunk_ov,
+            null,
+        ) catch |err| {
+            var err_buf: [128]u8 = undefined;
+            const emsg = std.fmt.bufPrint(&err_buf, "Infeed failed: {s}", .{@errorName(err)}) catch "Infeed failed";
+            sendError(stream, 500, emsg);
+            return;
+        };
+        defer result.deinit(self.engine.rag.allocator);
+
+        var json_buf = std.ArrayList(u8).init(self.allocator);
+        defer json_buf.deinit();
+        const writer = json_buf.writer();
+
+        writer.writeAll("{\"status\":\"ok\",\"collection\":") catch return;
+        writeJsonString(writer, result.collection) catch return;
+        writer.writeAll(",\"doc_id\":") catch return;
+        writeJsonString(writer, result.doc_id) catch return;
+        writer.writeAll(",\"doc_title\":") catch return;
+        writeJsonString(writer, result.doc_title) catch return;
+        writer.print(
+            ",\"chunks_created\":{d},\"total_characters\":{d},\"dimension\":{d}}}",
+            .{ result.chunks_created, result.total_characters, result.dimension },
+        ) catch return;
+
+        const swriter = stream.writer();
+        swriter.print(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}",
+            .{ json_buf.items.len, json_buf.items },
+        ) catch {};
+    }
+
+    fn serveRagInfeedTable(self: *WebServer, stream: std.net.Stream, body: []const u8) void {
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        const arena_alloc = arena.allocator();
+
+        const InfeedTablePayload = struct {
+            collection: []const u8,
+            table_name: []const u8,
+            columns: [][]const u8,
+            id_column: ?[]const u8 = null,
+            max_rows: ?usize = null,
+        };
+
+        const parsed = std.json.parseFromSlice(InfeedTablePayload, arena_alloc, body, .{ .ignore_unknown_fields = true }) catch {
+            sendError(stream, 400, "Invalid JSON payload for table infeed");
+            return;
+        };
+
+        const coll = std.mem.trim(u8, parsed.value.collection, " \t\r\n");
+        if (coll.len == 0) {
+            sendError(stream, 400, "Collection name cannot be empty");
+            return;
+        }
+
+        const tname = std.mem.trim(u8, parsed.value.table_name, " \t\r\n");
+        if (tname.len == 0) {
+            sendError(stream, 400, "Table name cannot be empty");
+            return;
+        }
+
+        if (parsed.value.columns.len == 0) {
+            sendError(stream, 400, "At least one text column must be selected");
+            return;
+        }
+
+        const max_r = if (parsed.value.max_rows) |m| (if (m == 0) null else m) else null;
+
+        const result = self.engine.rag.infeedTable(
+            tname,
+            parsed.value.columns,
+            parsed.value.id_column,
+            coll,
+            max_r,
+        ) catch |err| {
+            var err_buf: [128]u8 = undefined;
+            const emsg = std.fmt.bufPrint(&err_buf, "Table infeed failed: {s}", .{@errorName(err)}) catch "Table infeed failed";
+            sendError(stream, 500, emsg);
+            return;
+        };
+        defer result.deinit(self.engine.rag.allocator);
+
+        var json_buf = std.ArrayList(u8).init(self.allocator);
+        defer json_buf.deinit();
+        const writer = json_buf.writer();
+
+        writer.writeAll("{\"status\":\"ok\",\"collection\":") catch return;
+        writeJsonString(writer, result.collection) catch return;
+        writer.writeAll(",\"source_table\":") catch return;
+        writeJsonString(writer, tname) catch return;
+        writer.print(
+            ",\"rows_vectorized\":{d},\"total_characters\":{d},\"dimension\":{d}}}",
+            .{ result.chunks_created, result.total_characters, result.dimension },
+        ) catch return;
+
+        const swriter = stream.writer();
+        swriter.print(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}",
+            .{ json_buf.items.len, json_buf.items },
+        ) catch {};
+    }
+
+    fn serveRagQuery(self: *WebServer, stream: std.net.Stream, body: []const u8) void {
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        const arena_alloc = arena.allocator();
+
+        const RagQueryPayload = struct {
+            collection: []const u8,
+            query: []const u8,
+            top_k: ?usize = null,
+            min_score: ?f32 = null,
+        };
+
+        const parsed = std.json.parseFromSlice(RagQueryPayload, arena_alloc, body, .{ .ignore_unknown_fields = true }) catch {
+            sendError(stream, 400, "Invalid JSON payload for RAG query");
+            return;
+        };
+
+        const coll = std.mem.trim(u8, parsed.value.collection, " \t\r\n");
+        if (coll.len == 0) {
+            sendError(stream, 400, "Collection name cannot be empty");
+            return;
+        }
+
+        const q = std.mem.trim(u8, parsed.value.query, " \t\r\n");
+        if (q.len == 0) {
+            sendError(stream, 400, "Query cannot be empty");
+            return;
+        }
+
+        const top_k = parsed.value.top_k orelse 5;
+        const min_score = parsed.value.min_score orelse 0.0;
+
+        const result = self.engine.rag.queryRag(coll, q, null, top_k, min_score) catch |err| {
+            var err_buf: [128]u8 = undefined;
+            const emsg = std.fmt.bufPrint(&err_buf, "RAG search failed: {s}", .{@errorName(err)}) catch "RAG search failed";
+            sendError(stream, 500, emsg);
+            return;
+        };
+        defer result.deinit(self.engine.rag.allocator);
+
+        var json_buf = std.ArrayList(u8).init(self.allocator);
+        defer json_buf.deinit();
+        const writer = json_buf.writer();
+
+        writer.writeAll("{\"status\":\"ok\",\"collection\":") catch return;
+        writeJsonString(writer, result.collection) catch return;
+        writer.writeAll(",\"query\":") catch return;
+        writeJsonString(writer, result.query) catch return;
+        writer.writeAll(",\"context_prompt\":") catch return;
+        writeJsonString(writer, result.context_prompt) catch return;
+        writer.writeAll(",\"matches\":[") catch return;
+
+        for (result.matches, 0..) |m, i| {
+            if (i > 0) writer.writeAll(",") catch return;
+            writer.writeAll("{\"chunk_id\":") catch return;
+            writeJsonString(writer, m.chunk_id) catch return;
+            writer.writeAll(",\"doc_id\":") catch return;
+            writeJsonString(writer, m.doc_id) catch return;
+            writer.writeAll(",\"doc_title\":") catch return;
+            writeJsonString(writer, m.doc_title) catch return;
+            writer.print(",\"chunk_index\":{d},\"score\":{d:.4}", .{ m.chunk_index, m.score }) catch return;
+            writer.writeAll(",\"content\":") catch return;
+            writeJsonString(writer, m.content) catch return;
+            writer.writeAll(",\"metadata\":") catch return;
+            writeJsonString(writer, m.metadata) catch return;
+            writer.writeAll("}") catch return;
+        }
+
+        writer.writeAll("]}") catch return;
+
+        const swriter = stream.writer();
+        swriter.print(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}",
+            .{ json_buf.items.len, json_buf.items },
+        ) catch {};
+    }
+
+    fn serveRagCollections(self: *WebServer, stream: std.net.Stream) void {
+        const collections = self.engine.rag.listCollections() catch |err| {
+            var err_buf: [128]u8 = undefined;
+            const emsg = std.fmt.bufPrint(&err_buf, "Failed to list collections: {s}", .{@errorName(err)}) catch "Failed to list collections";
+            sendError(stream, 500, emsg);
+            return;
+        };
+        defer {
+            for (collections) |c| c.deinit(self.engine.rag.allocator);
+            self.engine.rag.allocator.free(collections);
+        }
+
+        var json_buf = std.ArrayList(u8).init(self.allocator);
+        defer json_buf.deinit();
+        const writer = json_buf.writer();
+
+        writer.writeAll("[") catch return;
+        for (collections, 0..) |c, i| {
+            if (i > 0) writer.writeAll(",") catch return;
+            writer.writeAll("{\"name\":") catch return;
+            writeJsonString(writer, c.name) catch return;
+            writer.writeAll(",\"table_name\":") catch return;
+            writeJsonString(writer, c.table_name) catch return;
+            writer.print(
+                ",\"chunk_count\":{d},\"doc_count\":{d},\"dimension\":{d},\"created_at\":{d}}}",
+                .{ c.chunk_count, c.doc_count, c.dimension, c.created_at },
+            ) catch return;
+        }
+        writer.writeAll("]") catch return;
+
+        const swriter = stream.writer();
+        swriter.print(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}",
+            .{ json_buf.items.len, json_buf.items },
+        ) catch {};
+    }
+
+    fn serveRagDeleteCollection(self: *WebServer, stream: std.net.Stream, body: []const u8) void {
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        const arena_alloc = arena.allocator();
+
+        const DelPayload = struct {
+            collection: []const u8,
+        };
+
+        const parsed = std.json.parseFromSlice(DelPayload, arena_alloc, body, .{ .ignore_unknown_fields = true }) catch {
+            sendError(stream, 400, "Invalid JSON payload for collection delete");
+            return;
+        };
+
+        const coll = std.mem.trim(u8, parsed.value.collection, " \t\r\n");
+        if (coll.len == 0) {
+            sendError(stream, 400, "Collection name cannot be empty");
+            return;
+        }
+
+        const deleted = self.engine.rag.deleteCollection(coll) catch false;
+        if (deleted) {
+            self.sendSuccess(stream, "Collection deleted successfully");
+        } else {
+            sendError(stream, 404, "Collection not found");
+        }
+    }
+
+    fn serveVectorSearch(self: *WebServer, stream: std.net.Stream, body: []const u8) void {
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
+        defer arena.deinit();
+        const arena_alloc = arena.allocator();
+
+        const SearchPayload = struct {
+            collection: ?[]const u8 = null,
+            table: ?[]const u8 = null,
+            query_text: ?[]const u8 = null,
+            top_k: ?usize = null,
+            min_score: ?f32 = null,
+        };
+
+        const parsed = std.json.parseFromSlice(SearchPayload, arena_alloc, body, .{ .ignore_unknown_fields = true }) catch {
+            sendError(stream, 400, "Invalid JSON payload for vector search");
+            return;
+        };
+
+        const target_coll = parsed.value.collection orelse (parsed.value.table orelse "default");
+        const clean_coll = if (std.mem.startsWith(u8, target_coll, "_rag_")) target_coll[5..] else target_coll;
+        const qtext = parsed.value.query_text orelse "";
+        const top_k = parsed.value.top_k orelse 5;
+        const min_score = parsed.value.min_score orelse 0.0;
+
+        const result = self.engine.rag.queryRag(clean_coll, qtext, null, top_k, min_score) catch |err| {
+            var err_buf: [128]u8 = undefined;
+            const emsg = std.fmt.bufPrint(&err_buf, "Vector search failed: {s}", .{@errorName(err)}) catch "Vector search failed";
+            sendError(stream, 500, emsg);
+            return;
+        };
+        defer result.deinit(self.engine.rag.allocator);
+
+        var json_buf = std.ArrayList(u8).init(self.allocator);
+        defer json_buf.deinit();
+        const writer = json_buf.writer();
+
+        writer.writeAll("{\"status\":\"ok\",\"collection\":") catch return;
+        writeJsonString(writer, result.collection) catch return;
+        writer.writeAll(",\"query\":") catch return;
+        writeJsonString(writer, result.query) catch return;
+        writer.writeAll(",\"context_prompt\":") catch return;
+        writeJsonString(writer, result.context_prompt) catch return;
+        writer.writeAll(",\"matches\":[") catch return;
+
+        for (result.matches, 0..) |m, i| {
+            if (i > 0) writer.writeAll(",") catch return;
+            writer.writeAll("{\"chunk_id\":") catch return;
+            writeJsonString(writer, m.chunk_id) catch return;
+            writer.writeAll(",\"doc_id\":") catch return;
+            writeJsonString(writer, m.doc_id) catch return;
+            writer.writeAll(",\"doc_title\":") catch return;
+            writeJsonString(writer, m.doc_title) catch return;
+            writer.print(",\"chunk_index\":{d},\"score\":{d:.4}", .{ m.chunk_index, m.score }) catch return;
+            writer.writeAll(",\"content\":") catch return;
+            writeJsonString(writer, m.content) catch return;
+            writer.writeAll(",\"metadata\":") catch return;
+            writeJsonString(writer, m.metadata) catch return;
+            writer.writeAll("}") catch return;
+        }
+
+        writer.writeAll("]}") catch return;
+
+        const swriter = stream.writer();
+        swriter.print(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: {d}\r\nConnection: close\r\n\r\n{s}",
+            .{ json_buf.items.len, json_buf.items },
+        ) catch {};
     }
 
     fn serveCreateTable(self: *WebServer, stream: std.net.Stream, body: []const u8) void {
@@ -9109,6 +10360,15 @@ pub const WebServer = struct {
             .blob => {
                 return Value{ .blob = try allocator.dupe(u8, val_str) };
             },
+            .vector => {
+                const trimmed = std.mem.trim(u8, val_str, " \t\r\n");
+                if (trimmed.len == 0) {
+                    if (!col.nullable) return error.NotNullViolation;
+                    return Value{ .null_val = {} };
+                }
+                const vec = vector.parseVector(allocator, trimmed) catch return error.InvalidVector;
+                return Value{ .vector = vec };
+            },
         };
     }
 
@@ -9348,6 +10608,11 @@ pub const WebServer = struct {
                         .timestamp => |tv| writer.print("{d}", .{tv}) catch return,
                         .text => |tv| writeJsonString(writer, tv) catch return,
                         .blob => |bv| writeJsonString(writer, bv) catch return,
+                        .vector => {
+                            const vec_str = val.toStringAlloc(self.allocator) catch "[]";
+                            defer self.allocator.free(vec_str);
+                            writeJsonString(writer, vec_str) catch return;
+                        },
                     }
                 } else {
                     writer.writeAll("null") catch return;

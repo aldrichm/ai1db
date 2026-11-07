@@ -117,6 +117,11 @@ pub const Table = struct {
                 .boolean => |b| try list.appendSlice(if (b) "true" else "false"),
                 .real => |r| try list.writer().print("{d}", .{r}),
                 .blob => |bl| try list.appendSlice(bl),
+                .vector => {
+                    const s = try row.values[idx].toStringAlloc(self.allocator);
+                    defer self.allocator.free(s);
+                    try list.appendSlice(s);
+                },
                 .null_val => try list.appendSlice("NULL"),
             }
         }

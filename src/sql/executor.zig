@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("../types.zig");
 const Value = types.Value;
+const DataType = types.DataType;
 const Row = types.Row;
 const Schema = types.Schema;
 const Column = types.Column;
@@ -12,6 +13,7 @@ const Expr = ast.Expr;
 const BinaryOp = ast.BinaryOp;
 const Engine = @import("../storage/engine.zig").Engine;
 const Table = @import("../storage/table.zig").Table;
+const vector = @import("../storage/vector.zig");
 
 pub const QueryResult = struct {
     allocator: std.mem.Allocator,
@@ -236,6 +238,23 @@ pub const Executor = struct {
         };
     }
 
+    fn coerceValueForColumn(allocator: std.mem.Allocator, col_type: DataType, val: Value) !Value {
+        if (col_type == .vector) {
+            switch (val) {
+                .text => |str| {
+                    const vec = try vector.parseVector(allocator, str);
+                    return Value{ .vector = vec };
+                },
+                .vector => {
+                    return try val.clone(allocator);
+                },
+                .null_val => return Value{ .null_val = {} },
+                else => return try val.clone(allocator),
+            }
+        }
+        return try val.clone(allocator);
+    }
+
     fn execInsert(self: *Executor, ins: ast.InsertStmt) !QueryResult {
         const table = self.engine.getTable(ins.table_name) orelse return error.TableNotFound;
 
@@ -246,12 +265,14 @@ pub const Executor = struct {
             if (cols.len != ins.values.len) return error.ColumnCountMismatch;
             for (cols, 0..) |col_name, i| {
                 const col_idx = table.schema.getColumnIndex(col_name) orelse return error.ColumnNotFound;
-                full_row.values[col_idx] = try ins.values[i].clone(self.allocator);
+                const col_type = table.schema.columns[col_idx].data_type;
+                full_row.values[col_idx] = try coerceValueForColumn(self.allocator, col_type, ins.values[i]);
             }
         } else {
             if (ins.values.len != table.schema.columns.len) return error.ColumnCountMismatch;
             for (ins.values, 0..) |v, i| {
-                full_row.values[i] = try v.clone(self.allocator);
+                const col_type = table.schema.columns[i].data_type;
+                full_row.values[i] = try coerceValueForColumn(self.allocator, col_type, v);
             }
         }
 
@@ -700,8 +721,10 @@ pub const Executor = struct {
 
                 for (u.assignments) |assign| {
                     const c_idx = table.schema.getColumnIndex(assign.column_name) orelse continue;
+                    const col_type = table.schema.columns[c_idx].data_type;
+                    const coerced = try coerceValueForColumn(self.allocator, col_type, assign.value);
                     new_row.values[c_idx].deinit(self.allocator);
-                    new_row.values[c_idx] = try assign.value.clone(self.allocator);
+                    new_row.values[c_idx] = coerced;
                 }
 
                 try self.engine.updateRow(u.table_name, pk, new_row);
@@ -914,3 +937,54 @@ pub const Executor = struct {
         };
     }
 };
+
+test "Executor - insert and update vector" {
+    const testing = std.testing;
+    const Parser = @import("parser.zig").Parser;
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const path = try tmp.dir.realpathAlloc(testing.allocator, ".");
+    defer testing.allocator.free(path);
+
+    const eng = try Engine.init(testing.allocator, path, "test-node");
+    defer eng.deinit();
+
+    var exec = Executor.init(testing.allocator, eng);
+
+    const runQuery = struct {
+        fn run(allocator: std.mem.Allocator, e: *Executor, sql: []const u8) !QueryResult {
+            var arena = std.heap.ArenaAllocator.init(allocator);
+            defer arena.deinit();
+            var parser = try Parser.init(arena.allocator(), sql);
+            defer parser.deinit();
+            const stmt = try parser.parse();
+            return try e.execute(stmt);
+        }
+    }.run;
+
+    var res1 = try runQuery(testing.allocator, &exec, "CREATE TABLE embeddings (id INT PRIMARY KEY, title TEXT, emb VECTOR);");
+    res1.deinit();
+
+    var res2 = try runQuery(testing.allocator, &exec, "INSERT INTO embeddings (id, title, emb) VALUES (1, 'doc1', '[0.1, 0.2, 0.3]');");
+    res2.deinit();
+
+    var res3 = try runQuery(testing.allocator, &exec, "SELECT id, title, emb FROM embeddings WHERE id = 1;");
+    defer res3.deinit();
+    try testing.expectEqual(@as(usize, 1), res3.rows.len);
+    try testing.expect(res3.rows[0][2] == .vector);
+    try testing.expectEqual(@as(usize, 3), res3.rows[0][2].vector.len);
+    try testing.expectApproxEqAbs(@as(f32, 0.1), res3.rows[0][2].vector[0], 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 0.2), res3.rows[0][2].vector[1], 0.001);
+    try testing.expectApproxEqAbs(@as(f32, 0.3), res3.rows[0][2].vector[2], 0.001);
+
+    var res4 = try runQuery(testing.allocator, &exec, "UPDATE embeddings SET emb = '[0.4, 0.5, 0.6]' WHERE id = 1;");
+    res4.deinit();
+
+    var res5 = try runQuery(testing.allocator, &exec, "SELECT emb FROM embeddings WHERE id = 1;");
+    defer res5.deinit();
+    try testing.expectEqual(@as(usize, 1), res5.rows.len);
+    try testing.expect(res5.rows[0][0] == .vector);
+    try testing.expectApproxEqAbs(@as(f32, 0.4), res5.rows[0][0].vector[0], 0.001);
+}

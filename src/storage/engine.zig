@@ -13,6 +13,7 @@ const crdt = @import("../sync/crdt.zig");
 const ConflictResolution = crdt.ConflictResolution;
 const MetadataManager = @import("metadata.zig").MetadataManager;
 pub const ModelManager = @import("models.zig").ModelManager;
+pub const vector = @import("vector.zig");
 const protocol = @import("../sync/protocol.zig");
 const TableSnapshot = protocol.TableSnapshot;
 const ColumnDesc = protocol.ColumnDesc;
@@ -33,6 +34,7 @@ pub const Engine = struct {
     wal: ?*WAL,
     metadata: *MetadataManager,
     models: *ModelManager,
+    rag: vector.RagManager,
     mutex: std.Thread.Mutex,
 
     // Mutation and DDL listeners for real-time peer streaming
@@ -86,6 +88,7 @@ pub const Engine = struct {
             .wal = wal,
             .metadata = metadata,
             .models = models,
+            .rag = vector.RagManager.init(allocator, engine),
             .mutex = std.Thread.Mutex{},
         };
 

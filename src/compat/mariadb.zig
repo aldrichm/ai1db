@@ -154,6 +154,11 @@ pub fn mapMariaDbType(type_str: []const u8) DataType {
     {
         return .blob;
     }
+    if (std.mem.startsWith(u8, upper, "VECTOR") or
+        std.mem.startsWith(u8, upper, "EMBEDDING"))
+    {
+        return .vector;
+    }
     return .text;
 }
 
@@ -859,6 +864,11 @@ pub const MariaDbImporter = struct {
                     return Value{ .boolean = b };
                 },
                 .blob => return Value{ .blob = unescaped },
+                .vector => {
+                    defer self.allocator.free(unescaped);
+                    const vec = @import("../storage/vector.zig").parseVector(self.allocator, unescaped) catch return Value{ .vector = try self.allocator.alloc(f32, 0) };
+                    return Value{ .vector = vec };
+                },
             }
         }
 
@@ -894,6 +904,10 @@ pub const MariaDbImporter = struct {
             },
             .text => {
                 return Value{ .text = try self.allocator.dupe(u8, trimmed) };
+            },
+            .vector => {
+                const vec = @import("../storage/vector.zig").parseVector(self.allocator, trimmed) catch return Value{ .vector = try self.allocator.alloc(f32, 0) };
+                return Value{ .vector = vec };
             },
         }
     }

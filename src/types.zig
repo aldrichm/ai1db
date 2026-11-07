@@ -7,6 +7,7 @@ pub const DataType = enum(u8) {
     boolean = 4,
     timestamp = 5,
     blob = 6,
+    vector = 7,
 
     pub fn fromString(str: []const u8) ?DataType {
         if (std.ascii.eqlIgnoreCase(str, "INT") or
@@ -36,6 +37,13 @@ pub const DataType = enum(u8) {
             std.ascii.eqlIgnoreCase(str, "BYTES"))
         {
             return .blob;
+        } else if (std.ascii.eqlIgnoreCase(str, "VECTOR") or
+            std.ascii.eqlIgnoreCase(str, "EMBEDDING") or
+            std.ascii.startsWithIgnoreCase(str, "VECTOR(") or
+            std.ascii.startsWithIgnoreCase(str, "FLOAT[") or
+            std.ascii.startsWithIgnoreCase(str, "ARRAY<FLOAT"))
+        {
+            return .vector;
         }
         return null;
     }
@@ -48,6 +56,7 @@ pub const DataType = enum(u8) {
             .boolean => "BOOLEAN",
             .timestamp => "TIMESTAMP",
             .blob => "BLOB",
+            .vector => "VECTOR",
         };
     }
 };
@@ -60,6 +69,7 @@ pub const ValueTag = enum(u8) {
     boolean = 4,
     timestamp = 5,
     blob = 6,
+    vector = 7,
 };
 
 pub const Value = union(ValueTag) {
@@ -70,6 +80,7 @@ pub const Value = union(ValueTag) {
     boolean: bool,
     timestamp: i64,
     blob: []const u8,
+    vector: []f32,
 
     pub fn clone(self: Value, allocator: std.mem.Allocator) !Value {
         return switch (self) {
@@ -80,6 +91,7 @@ pub const Value = union(ValueTag) {
             .boolean => |b| Value{ .boolean = b },
             .timestamp => |ts| Value{ .timestamp = ts },
             .blob => |b| Value{ .blob = try allocator.dupe(u8, b) },
+            .vector => |v| Value{ .vector = try allocator.dupe(f32, v) },
         };
     }
 
@@ -87,6 +99,7 @@ pub const Value = union(ValueTag) {
         switch (self) {
             .text => |t| allocator.free(t),
             .blob => |b| allocator.free(b),
+            .vector => |v| allocator.free(v),
             else => {},
         }
     }
@@ -104,6 +117,7 @@ pub const Value = union(ValueTag) {
             .boolean => .boolean,
             .timestamp => .timestamp,
             .blob => .blob,
+            .vector => .vector,
         };
     }
 
@@ -154,6 +168,18 @@ pub const Value = union(ValueTag) {
                 }
                 return std.math.order(@intFromEnum(self), @intFromEnum(other));
             },
+            .vector => |a| {
+                if (other == .vector) {
+                    const b = other.vector;
+                    if (a.len != b.len) return std.math.order(a.len, b.len);
+                    for (a, 0..) |av, i| {
+                        const cmp = std.math.order(av, b[i]);
+                        if (cmp != .eq) return cmp;
+                    }
+                    return .eq;
+                }
+                return std.math.order(@intFromEnum(self), @intFromEnum(other));
+            },
             .null_val => unreachable,
         }
     }
@@ -171,6 +197,41 @@ pub const Value = union(ValueTag) {
             .boolean => |b| return try allocator.dupe(u8, if (b) "true" else "false"),
             .timestamp => |ts| return try std.fmt.allocPrint(allocator, "{d}", .{ts}),
             .blob => |b| return try std.fmt.allocPrint(allocator, "<blob {d} bytes>", .{b.len}),
+            .vector => |v| {
+                if (v.len == 0) return try allocator.dupe(u8, "[]");
+                if (v.len <= 4) {
+                    var buf = try std.ArrayList(u8).initCapacity(allocator, 64);
+                    errdefer buf.deinit();
+                    try buf.append('[');
+                    for (v, 0..) |flt, idx| {
+                        if (idx > 0) try buf.appendSlice(", ");
+                        try buf.writer().print("{d:.4}", .{flt});
+                    }
+                    try buf.append(']');
+                    return try buf.toOwnedSlice();
+                } else {
+                    return try std.fmt.allocPrint(allocator, "[{d:.4}, {d:.4}, ..., {d:.4}] (dim: {d})", .{
+                        v[0], v[1], v[v.len - 1], v.len,
+                    });
+                }
+            },
+        }
+    }
+
+    pub fn toFullVectorStringAlloc(self: Value, allocator: std.mem.Allocator) ![]const u8 {
+        switch (self) {
+            .vector => |v| {
+                var buf = try std.ArrayList(u8).initCapacity(allocator, v.len * 12 + 2);
+                errdefer buf.deinit();
+                try buf.append('[');
+                for (v, 0..) |flt, idx| {
+                    if (idx > 0) try buf.appendSlice(",");
+                    try buf.writer().print("{d:.6}", .{flt});
+                }
+                try buf.append(']');
+                return try buf.toOwnedSlice();
+            },
+            else => return self.toStringAlloc(allocator),
         }
     }
 
@@ -189,6 +250,12 @@ pub const Value = union(ValueTag) {
             .blob => |b| {
                 try writer.writeInt(u32, @intCast(b.len), .little);
                 try writer.writeAll(b);
+            },
+            .vector => |v| {
+                try writer.writeInt(u32, @intCast(v.len), .little);
+                for (v) |flt| {
+                    try writer.writeInt(u32, @as(u32, @bitCast(flt)), .little);
+                }
             },
         }
     }
@@ -221,6 +288,16 @@ pub const Value = union(ValueTag) {
                 errdefer allocator.free(buf);
                 try reader.readNoEof(buf);
                 return Value{ .blob = buf };
+            },
+            .vector => {
+                const len = try reader.readInt(u32, .little);
+                const buf = try allocator.alloc(f32, len);
+                errdefer allocator.free(buf);
+                for (buf) |*flt| {
+                    const bits = try reader.readInt(u32, .little);
+                    flt.* = @as(f32, @bitCast(bits));
+                }
+                return Value{ .vector = buf };
             },
         };
     }
